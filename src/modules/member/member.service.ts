@@ -1,0 +1,381 @@
+import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, MoreThan } from 'typeorm';
+import { Member } from '../../entities/member.entity';
+import { MemberVerification } from '../../entities/member-verification.entity';
+import { MemberService as MemberServiceEntity } from '../../entities/member-service.entity';
+import { AppTotalGoTask } from '../../entities/app-total-go-task.entity';
+import { ExternalApiService } from '../external-api/external-api.service';
+import { SendOtpDto } from '../../dto/send-otp.dto';
+import { VerifyOtpDto } from '../../dto/verify-otp.dto';
+import { SubmitUserInfoDto } from '../../dto/submit-user-info.dto';
+import { CreateMemberWithServiceDto } from '../../dto/create-member-with-service.dto';
+import { CreateTaskDto } from '../../dto/create-task.dto';
+import * as nodemailer from 'nodemailer';
+
+@Injectable()
+export class MemberService {
+  private transporter: nodemailer.Transporter;
+
+  constructor(
+    @InjectRepository(Member)
+    private readonly memberRepo: Repository<Member>,
+    @InjectRepository(MemberVerification)
+    private readonly verificationRepo: Repository<MemberVerification>,
+    @InjectRepository(MemberServiceEntity)
+    private readonly memberServiceRepo: Repository<MemberServiceEntity>,
+    @InjectRepository(AppTotalGoTask)
+    private readonly taskRepo: Repository<AppTotalGoTask>,
+    private readonly externalApiService: ExternalApiService,
+  ) {
+    // Initialize email transporter with SMTP config from environment
+    this.transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || '587', 10),
+      secure: false, // true for 465, false for other ports
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+  }
+
+  /**
+   * Generate random 6-digit OTP
+   */
+  private generateOtp(): string {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+  }
+
+  /**
+   * Get OTP expiration time in milliseconds (from environment or default 10 minutes)
+   */
+  private getOtpExpirationTime(): number {
+    const expirationSeconds = parseInt(process.env.OTP_EXPIRATION_TIME || '600', 10);
+    return expirationSeconds * 1000; // Convert to milliseconds
+  }
+
+  /**
+   * Send OTP to email (real implementation using nodemailer)
+   */
+  private async sendEmailOtp(email: string, otp: string): Promise<void> {
+    try {
+      const mailOptions = {
+        from: process.env.SMTP_FROM,
+        to: email,
+        subject: 'VietGuardScan - Mã xác thực OTP',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #333;">Xác thực VietGuardScan</h2>
+            <p style="color: #666; font-size: 16px;">Mã xác thực OTP của bạn là:</p>
+            <div style="background-color: #f0f0f0; padding: 20px; text-align: center; border-radius: 5px; margin: 20px 0;">
+              <h1 style="color: #007bff; letter-spacing: 5px; margin: 0;">${otp}</h1>
+            </div>
+            <p style="color: #999; font-size: 14px;">Mã này có hiệu lực trong 10 phút.</p>
+            <p style="color: #999; font-size: 14px;">Nếu bạn không yêu cầu mã này, vui lòng bỏ qua email này.</p>
+            <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+            <p style="color: #999; font-size: 12px;">© 2024 VietGuardScan. All rights reserved.</p>
+          </div>
+        `,
+      };
+
+      await this.transporter.sendMail(mailOptions);
+      console.log(`OTP sent successfully to ${email}`);
+    } catch (error) {
+      console.error(`Failed to send OTP to ${email}:`, error);
+      throw new BadRequestException('Failed to send OTP email');
+    }
+  }
+
+  /**
+   * Send OTP for verification
+   */
+  async sendOtp(sendOtpDto: SendOtpDto): Promise<{ message: string }> {
+    const { email } = sendOtpDto;
+
+    // Find or create member
+    let member = await this.memberRepo.findOne({ where: { name: email } });
+    if (!member) {
+      member = this.memberRepo.create({
+        name: email,
+        email: email,
+      });
+      await this.memberRepo.save(member);
+    }
+
+    // Generate and save OTP
+    const otp = this.generateOtp();
+    const expirationTime = this.getOtpExpirationTime();
+    const expiresAt = new Date(Date.now() + expirationTime);
+
+    const verification = this.verificationRepo.create({
+      member_id: member.id,
+      otp: otp,
+      otp_verified: false,
+      otp_expires_at: expiresAt,
+    });
+
+    await this.verificationRepo.save(verification);
+
+    // Send OTP via email
+    await this.sendEmailOtp(email, otp);
+
+    return { message: 'OTP sent successfully' };
+  }
+
+  /**
+   * Verify OTP
+   */
+  async verifyOtp(verifyOtpDto: VerifyOtpDto): Promise<{ message: string; verified: boolean }> {
+    const { email, otp } = verifyOtpDto;
+
+    const member = await this.memberRepo.findOne({ where: { name: email } });
+    if (!member) {
+      throw new NotFoundException('Member not found');
+    }
+
+    // Find the most recent unverified OTP
+    const verification = await this.verificationRepo.findOne({
+      where: {
+        member_id: member.id,
+        otp: otp,
+        otp_verified: false
+      },
+      order: { created_at: 'DESC' }
+    });
+
+    if (!verification) {
+      throw new BadRequestException('Invalid OTP');
+    }
+
+    // Check if OTP is expired
+    const now = new Date();
+    if (verification.otp_expires_at && now > verification.otp_expires_at) {
+      throw new BadRequestException('OTP expired');
+    }
+
+    // Mark as verified
+    verification.otp_verified = true;
+    await this.verificationRepo.save(verification);
+
+    return { message: 'OTP verified successfully', verified: true };
+  }
+
+  /**
+   * Submit user information after OTP verification
+   */
+  async submitUserInfo(submitUserInfoDto: SubmitUserInfoDto): Promise<{ message: string }> {
+    const { email, otp, full_name, company_name, phone, note } = submitUserInfoDto;
+
+    const member = await this.memberRepo.findOne({ where: { name: email } });
+    if (!member) {
+      throw new NotFoundException('Member not found');
+    }
+
+    // Find the verified OTP record
+    const verification = await this.verificationRepo.findOne({
+      where: {
+        member_id: member.id,
+        otp: otp,
+        otp_verified: true
+      },
+      order: { created_at: 'DESC' }
+    });
+
+    if (!verification) {
+      throw new BadRequestException('OTP not verified or invalid');
+    }
+
+    // Update verification record with user information
+    verification.full_name = full_name;
+    verification.company_name = company_name;
+    if (phone) verification.phone = phone;
+    if (note) verification.note = note;
+
+    await this.verificationRepo.save(verification);
+
+    return { message: 'User information saved successfully' };
+  }
+
+  /**
+   * Create member with services (both local DB and external API)
+   */
+  async createMemberWithService(createMemberDto: CreateMemberWithServiceDto): Promise<any> {
+    const { email, services } = createMemberDto;
+
+    // Check if member exists
+    let member = await this.memberRepo.findOne({ where: { name: email } });
+    if (!member) {
+      throw new BadRequestException('Member does not exist. Please send OTP and verify first.');
+    }
+
+    // Check if OTP has been verified
+    const verification = await this.verificationRepo.findOne({
+      where: {
+        member_id: member.id,
+        otp_verified: true,
+      },
+      order: { created_at: 'DESC' }
+    });
+
+    if (!verification) {
+      throw new ForbiddenException('Email has not been verified. Please verify OTP and submit user info first.');
+    }
+
+    // Check if member already exists in external system
+    if (member.external_id) {
+      console.log(`Member already exists in external system with ID: ${member.external_id}`);
+    } else {
+      // Log payload trước khi gọi external API
+      const payload = {
+        name: `Guest${member.id}`,
+        services: services,
+      };
+      console.log('Payload gửi external API:', JSON.stringify(payload));
+      try {
+        const externalResponse = await this.externalApiService.createMember(payload);
+        console.log('External member creation response:', externalResponse);
+
+        // Save external ID if returned
+        if (externalResponse && externalResponse.data && externalResponse.data.id) {
+          member.external_id = externalResponse.data.id.toString();
+          await this.memberRepo.save(member);
+          console.log(`Member created in external system with ID: ${member.external_id}`);
+        }
+      } catch (error) {
+        console.error('Failed to create member in external system:', error);
+        // Continue with local creation even if external fails
+      }
+    }
+
+    // Save services locally
+    for (const service of services) {
+      const memberService = this.memberServiceRepo.create({
+        member_id: member.id,
+        service_type: service.serviceType,
+      });
+      await this.memberServiceRepo.save(memberService);
+    }
+
+    let res = {
+      message: 'Member created successfully with services',
+      member: {
+        id: member.id,
+        name: member.name,
+        email: member.email,
+        services: services
+      }
+    };
+
+    console.log(res)
+
+    return {
+      message: 'Member created successfully with services',
+      member: {
+        id: member.id,
+        name: member.name,
+        email: member.email,
+        services: services
+      }
+    };
+  }
+
+  /**
+   * Check if member can scan (rate limiting: max 3 times per hour)
+   */
+  async canScan(memberName: string): Promise<boolean> {
+    const member = await this.memberRepo.findOne({ where: { name: memberName } });
+    if (!member) return false;
+
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const taskCount = await this.taskRepo.count({
+      where: {
+        member_id: member.id,
+        created_at: MoreThan(oneHourAgo),
+      },
+    });
+
+    return taskCount < 3;
+  }
+
+  /**
+   * Create AppTotalGo task with rate limiting
+   */
+  async createTask(createTaskDto: CreateTaskDto, file: any): Promise<any> {
+    const { memberName, clientIp } = createTaskDto;
+
+    // Check rate limiting
+    const canScan = await this.canScan(memberName);
+    if (!canScan) {
+      throw new ForbiddenException('Scan quá nhiều, hãy thử lại sau hoặc liên hệ với chúng tôi.');
+    }
+
+    const member = await this.memberRepo.findOne({ where: { name: memberName } });
+    if (!member) {
+      throw new NotFoundException('Member not found');
+    }
+
+    // Create task in local DB first
+    const task = this.taskRepo.create({
+      member_id: member.id,
+      file_name: file.originalname,
+      status: 'pending',
+    });
+    await this.taskRepo.save(task);
+
+    // Call external API
+    try {
+      const externalResponse = await this.externalApiService.createAppTotalGo({
+        memberName: `Guest${member.id}`, // Use same format as createMemberWithService
+        clientIp: clientIp,
+        file: file
+      }, file);
+
+      // Update task with external response
+      if (externalResponse && externalResponse.data && externalResponse.data.id) {
+        task.external_task_id = externalResponse.data.id.toString();
+        task.status = 'submitted';
+        await this.taskRepo.save(task);
+      }
+
+      return {
+        message: 'Task created successfully',
+        taskId: task.id,
+        externalTaskId: task.external_task_id,
+        status: task.status
+      };
+    } catch (error) {
+      // Update local task status to failed
+      task.status = 'failed';
+      await this.taskRepo.save(task);
+
+      throw new BadRequestException('Failed to create task in external system');
+    }
+  }
+
+  /**
+   * Get member information and verification history
+   */
+  async getMemberInfo(email: string): Promise<any> {
+    const member = await this.memberRepo.findOne({
+      where: { name: email },
+      relations: ['verifications', 'services', 'tasks']
+    });
+
+    if (!member) {
+      throw new NotFoundException('Member not found');
+    }
+
+    return {
+      id: member.id,
+      name: member.name,
+      email: member.email,
+      external_id: member.external_id,
+      verifications: member.verifications,
+      services: member.services,
+      tasks: member.tasks,
+      created_at: member.created_at,
+      updated_at: member.updated_at
+    };
+  }
+}

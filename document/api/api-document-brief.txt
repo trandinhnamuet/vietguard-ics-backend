@@ -1,0 +1,79 @@
+===============================================
+VIETGUARDSCAN BACKEND - API BRIEF DOCUMENTATION
+===============================================
+
+MEMBER APIs - Xác thực & Quản lý thành viên
+==============================================
+
+1. POST /api/members/send-otp
+   Mô tả: Gửi mã OTP 6 chữ số đến email của người dùng để xác thực
+
+2. POST /api/members/verify-otp
+   Mô tả: Xác minh mã OTP được gửi đến email (kiểm tra tính hợp lệ và hết hạn)
+
+3. POST /api/members/submit-info
+   Mô tả: Nộp thông tin cá nhân sau khi OTP được xác minh (họ tên, công ty, điện thoại, ghi chú)
+
+4. POST /api/members/create-with-service
+   Mô tả: Tạo member và gán dịch vụ (yêu cầu OTP phải được xác minh trước)
+
+5. GET /api/members/{email}
+   Mô tả: Lấy thông tin chi tiết của member bao gồm lịch sử xác minh, dịch vụ và các task
+
+
+DEALER APIs - Quản lý đại lý
+=============================
+
+1. GET /api/dealers/export-service-usage-logs
+   Mô tả: Xuất file Excel chứa lịch sử sử dụng dịch vụ của đại lý
+
+
+SERVICE APIs - Phân tích ứng dụng
+==================================
+
+1. POST /api/service/app-total-go
+   Mô tả: Tạo task phân tích ứng dụng AppTotalGo (upload file APK/APP)
+
+2. GET /api/service/app-total-go/status/{id}
+   Mô tả: Lấy trạng thái của task phân tích
+
+3. GET /api/service/app-total-go/files/{id}
+   Mô tả: Tải xuống file kết quả phân tích (file ZIP)
+
+4. GET /api/service/app-total-go/history
+   Mô tả: Lấy lịch sử các task phân tích (có hỗ trợ lọc theo thời gian)
+
+
+EXTERNAL API WRAPPER - Gọi API hệ thống ngoài (8 APIs)
+======================================================
+
+1. POST /api/members
+   Mô tả: Tạo member thông qua API wrapper (external)
+
+2. GET /api/members
+   Mô tả: Lấy danh sách members với phân trang và sắp xếp (external)
+
+3. POST /api/members/services
+   Mô tả: Gán dịch vụ cho member hiện có (external)
+
+4. POST /api/service/app-total-go (External)
+   Mô tả: Tạo task phân tích ứng dụng (external)
+
+5. GET /api/service/app-total-go/status/{id} (External)
+   Mô tả: Lấy trạng thái task phân tích (external)
+
+6. GET /api/service/app-total-go/files/{id} (External)
+   Mô tả: Tải file kết quả phân tích (external)
+
+7. GET /api/service/app-total-go/history (External)
+   Mô tả: Lấy lịch sử phân tích (external)
+
+8. GET /api/dealers/export-service-usage-logs (External)
+   Mô tả: Xuất file Excel lịch sử sử dụng dịch vụ (external)
+
+
+===============================================
+TỔNG CỘNG: 19 ENDPOINTS
+===============================================
+5 Member APIs + 1 Dealer API + 4 Service APIs + 8 External Wrapper APIs = 19 endpoints
+===============================================

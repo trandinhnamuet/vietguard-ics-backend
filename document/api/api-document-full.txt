@@ -1,0 +1,448 @@
+===============================================
+VIETGUARDSCAN BACKEND - FULL API DOCUMENTATION
+===============================================
+
+MEMBER APIs - Xác thực & Quản lý thành viên
+==============================================
+
+===============================================
+1. POST /api/members/send-otp
+===============================================
+Mô tả: Gửi mã OTP 6 chữ số đến email của người dùng để xác thực
+
+Request:
+  URL: POST http://localhost:3000/api/members/send-otp
+  Content-Type: application/json
+  
+  {
+    "email": "user@example.com"
+  }
+
+Success Response (200):
+  {
+    "message": "OTP sent successfully"
+  }
+
+Error Responses:
+  - 400: Invalid email format
+  - 500: Failed to send email
+
+Notes:
+  - OTP có hiệu lực trong 600 giây (10 phút) - có thể config trong OTP_EXPIRATION_TIME env
+  - Email được gửi qua SMTP (Gmail)
+  - Nếu email chưa tồn tại trong hệ thống, member sẽ được tạo tự động
+
+
+===============================================
+2. POST /api/members/verify-otp
+===============================================
+Mô tả: Xác minh mã OTP được gửi đến email (kiểm tra tính hợp lệ và hết hạn)
+
+Request:
+  URL: POST http://localhost:3000/api/members/verify-otp
+  Content-Type: application/json
+  
+  {
+    "email": "user@example.com",
+    "otp": "123456"
+  }
+
+Success Response (200):
+  {
+    "message": "OTP verified successfully",
+    "verified": true
+  }
+
+Error Responses:
+  - 400 Invalid OTP: Mã OTP không đúng hoặc không tìm thấy
+  - 400 OTP expired: Mã OTP đã hết hạn (quá 10 phút)
+  - 404 Member not found: Email chưa được tạo
+
+Notes:
+  - OTP chỉ có thể verify một lần
+  - Kiểm tra timestamp otp_expires_at để xác định hết hạn
+
+
+===============================================
+3. POST /api/members/submit-info
+===============================================
+Mô tả: Nộp thông tin cá nhân sau khi OTP được xác minh
+
+Request:
+  URL: POST http://localhost:3000/api/members/submit-info
+  Content-Type: application/json
+  
+  {
+    "email": "user@example.com",
+    "otp": "123456",
+    "full_name": "Nguyễn Văn A",
+    "company_name": "VietGuard Company",
+    "phone": "0912345678",
+    "note": "Ghi chú thêm"
+  }
+
+Success Response (200):
+  {
+    "message": "User information saved successfully"
+  }
+
+Error Responses:
+  - 400 OTP not verified or invalid: OTP chưa được xác minh
+  - 404 Member not found: Email không tồn tại
+
+Notes:
+  - Yêu cầu OTP phải được verify trước
+  - Chỉ có thể nộp info cho OTP đã verified
+  - phone và note là optional
+
+
+===============================================
+4. POST /api/members/create-with-service
+===============================================
+Mô tả: Tạo member và gán dịch vụ (yêu cầu OTP phải được xác minh trước)
+
+Request:
+  URL: POST http://localhost:3000/api/members/create-with-service
+  Content-Type: application/json
+  
+  {
+    "email": "user@example.com",
+    "services": [
+      {
+        "serviceType": 4
+      },
+      {
+        "serviceType": 5
+      }
+    ]
+  }
+
+Success Response (201):
+  {
+    "message": "Member created successfully with services",
+    "member": {
+      "id": 1,
+      "name": "user@example.com",
+      "email": "user@example.com",
+      "services": [
+        {
+          "serviceType": 4
+        },
+        {
+          "serviceType": 5
+        }
+      ]
+    }
+  }
+
+Error Responses:
+  - 400 Member does not exist: Email chưa được tạo (chưa gửi OTP)
+  - 403 Email has not been verified: Email chưa được verify OTP
+
+Notes:
+  - Bắt buộc phải send OTP → verify OTP → submit info trước khi gọi API này
+  - Services sẽ được lưu vào local DB và gửi đến external API
+  - Nếu external API fail, vẫn lưu vào local DB
+
+
+===============================================
+5. GET /api/members/{email}
+===============================================
+Mô tả: Lấy thông tin chi tiết của member
+
+Request:
+  URL: GET http://localhost:3000/api/members/user@example.com
+
+Success Response (200):
+  {
+    "id": 1,
+    "name": "user@example.com",
+    "email": "user@example.com",
+    "external_id": "ext-123",
+    "verifications": [
+      {
+        "id": 1,
+        "member_id": 1,
+        "otp_verified": true,
+        "full_name": "Nguyễn Văn A",
+        "company_name": "VietGuard Company",
+        "phone": "0912345678",
+        "note": "Ghi chú",
+        "created_at": "2024-12-05T10:00:00Z"
+      }
+    ],
+    "services": [
+      {
+        "id": 1,
+        "member_id": 1,
+        "service_type": 4,
+        "created_at": "2024-12-05T10:05:00Z"
+      }
+    ],
+    "tasks": [
+      {
+        "id": 1,
+        "member_id": 1,
+        "file_name": "app.apk",
+        "status": "submitted",
+        "external_task_id": "ext-task-123",
+        "created_at": "2024-12-05T10:10:00Z"
+      }
+    ],
+    "created_at": "2024-12-05T10:00:00Z",
+    "updated_at": "2024-12-05T10:10:00Z"
+  }
+
+Error Responses:
+  - 404 Member not found: Email không tồn tại
+
+
+===============================================
+6. POST /api/members/create-task
+===============================================
+Mô tả: (ĐÃ LOẠI BỎ) API này đã được loại bỏ để tránh trùng lặp chức năng
+Sử dụng: POST /api/service/app-total-go thay thế
+
+
+===============================================
+DEALER APIs - Quản lý đại lý
+=============================
+
+===============================================
+1. GET /api/dealers/export-service-usage-logs
+===============================================
+Mô tả: Xuất file Excel chứa lịch sử sử dụng dịch vụ của đại lý
+
+Request:
+  URL: GET http://localhost:3000/api/dealers/export-service-usage-logs
+
+Success Response (200):
+  Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+  [Binary Excel File]
+  
+  Headers:
+  - Content-Disposition: attachment; filename=service-usage-logs.xlsx
+
+Error Responses:
+  - 400: Lỗi khi xuất file
+
+
+===============================================
+SERVICE APIs - Phân tích ứng dụng
+==================================
+
+===============================================
+1. POST /api/service/app-total-go
+===============================================
+Mô tả: Tạo task phân tích ứng dụng AppTotalGo
+
+Request:
+  URL: POST http://localhost:3000/api/service/app-total-go
+  Content-Type: multipart/form-data
+  
+  Fields:
+  - memberName: "user@example.com"
+  - clientIp: "192.168.1.1"
+  - file: <binary file>
+
+Success Response (201):
+  {
+    "taskId": "ext-task-123",
+    "status": "pending",
+    "message": "Task created successfully"
+  }
+
+Error Responses:
+  - 400: Invalid request
+  - 500: External API error
+
+
+===============================================
+2. GET /api/service/app-total-go/status/{id}
+===============================================
+Mô tả: Lấy trạng thái của task phân tích
+
+Request:
+  URL: GET http://localhost:3000/api/service/app-total-go/status/ext-task-123
+
+Success Response (200):
+  {
+    "taskId": "ext-task-123",
+    "status": "completed",
+    "progress": 100,
+    "result": {
+      "riskLevel": "HIGH",
+      "detectedThreats": 5
+    }
+  }
+
+Error Responses:
+  - 404 Task not found: Task không tồn tại
+
+
+===============================================
+3. GET /api/service/app-total-go/files/{id}
+===============================================
+Mô tả: Tải xuống file kết quả phân tích
+
+Request:
+  URL: GET http://localhost:3000/api/service/app-total-go/files/ext-task-123
+
+Success Response (200):
+  Content-Type: application/octet-stream
+  [Binary ZIP File]
+  
+  Headers:
+  - Content-Disposition: attachment; filename=analysis-result-ext-task-123.zip
+
+Error Responses:
+  - 404: File not found
+
+
+===============================================
+4. GET /api/service/app-total-go/history
+===============================================
+Mô tả: Lấy lịch sử các task phân tích
+
+Request:
+  URL: GET http://localhost:3000/api/service/app-total-go/history?startTime=2024-12-01T00:00:00Z&endTime=2024-12-05T23:59:59Z
+
+Query Parameters:
+  - startTime: ISO 8601 format (optional)
+  - endTime: ISO 8601 format (optional)
+
+Success Response (200):
+  {
+    "tasks": [
+      {
+        "taskId": "ext-task-123",
+        "memberName": "user@example.com",
+        "status": "completed",
+        "createdAt": "2024-12-05T10:00:00Z"
+      },
+      {
+        "taskId": "ext-task-124",
+        "memberName": "user@example.com",
+        "status": "pending",
+        "createdAt": "2024-12-05T11:00:00Z"
+      }
+    ]
+  }
+
+
+===============================================
+EXTERNAL API WRAPPER - Gọi API hệ thống ngoài
+===============================================
+
+===============================================
+1. POST /api/members (External)
+===============================================
+Mô tả: Tạo member thông qua API wrapper
+
+Request:
+  URL: POST http://localhost:3000/api/members
+  Content-Type: application/json
+  
+  {
+    "name": "user@example.com",
+    "services": [
+      {
+        "serviceType": 4
+      }
+    ]
+  }
+
+Success Response (201):
+  {
+    "id": 1,
+    "name": "user@example.com",
+    "services": [...]
+  }
+
+
+===============================================
+2. GET /api/members (External)
+===============================================
+Mô tả: Lấy danh sách members
+
+Request:
+  URL: GET http://localhost:3000/api/members?page=1&limit=10&sortOrder=Desc&sortBy=CreatedAt
+
+Query Parameters:
+  - page: int (default: 1)
+  - limit: int (default: 10)
+  - sortOrder: "Asc" | "Desc" (default: Desc)
+  - sortBy: "CreatedAt" | "UpdatedAt" (default: CreatedAt)
+  - memberName: string (optional - filter)
+  - dealerName: string (optional - filter)
+
+Success Response (200):
+  {
+    "data": [
+      {
+        "id": 1,
+        "name": "user@example.com",
+        "email": "user@example.com"
+      }
+    ],
+    "total": 100,
+    "page": 1,
+    "limit": 10
+  }
+
+
+===============================================
+3. POST /api/members/services (External)
+===============================================
+Mô tả: Gán dịch vụ cho member
+
+Request:
+  URL: POST http://localhost:3000/api/members/services
+  Content-Type: application/json
+  
+  {
+    "id": 1,
+    "services": [
+      {
+        "serviceType": 4
+      }
+    ]
+  }
+
+Success Response (200):
+  {
+    "message": "Services assigned successfully"
+  }
+
+
+===============================================
+Tóm tắt Thông tin Quan trọng
+===============================================
+
+OTP Configuration:
+- OTP_EXPIRATION_TIME: 600 giây (10 phút) - có thể điều chỉnh trong .env
+
+Database:
+- Schema: vietguard
+- Tables: members, member_verifications, member_services, app_total_go_tasks, etc.
+
+Authentication Flow:
+1. Send OTP
+2. Verify OTP
+3. Submit User Info
+4. Create Member with Service
+5. Create Task via Service API (không có rate limiting ở API wrapper)
+
+External API:
+- Base URL: https://global-pro.hypergsecurity.com/
+- Requires API_KEY: ca82d1fb341a2ab6b9a0ff3abd359348d36810213e818c3bf5a7174e0b9a73ee32bb2c6234700cec0f21a66d8d370ef4adb291d1e2b4f966b2d7e7e2cd5e796f
+
+Email Configuration:
+- SMTP Host: smtp.gmail.com
+- SMTP Port: 587
+- From: minhtuan90959095@gmail.com
+
+API Endpoints Tổng cộng: 19
+===============================================
+
+===============================================
