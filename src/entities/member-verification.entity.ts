@@ -34,6 +34,12 @@ export class MemberVerification {
   @Column({ type: 'text', nullable: true })
   note: string;
 
+  @Column({ name: 'file_name', length: 255, nullable: true })
+  file_name: string;
+
+  @Column({ name: 'file_size', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  file_size: number;
+
   @Column({ name: 'otp_expires_at', type: 'timestamp', nullable: true })
   otp_expires_at: Date;
 

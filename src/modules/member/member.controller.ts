@@ -58,6 +58,16 @@ export class MemberController {
     return await this.memberService.createMemberWithService(createMemberDto);
   }
 
+  @Get('verifications/all')
+  @ApiOperation({
+    summary: 'Get all member verifications',
+    description: 'Get all member verification records with member email',
+  })
+  @ApiResponse({ status: 200, description: 'Member verifications retrieved successfully' })
+  async getAllMemberVerifications() {
+    return await this.memberService.getAllMemberVerifications();
+  }
+
   @Get(':email')
   @ApiOperation({
     summary: 'Get member information',

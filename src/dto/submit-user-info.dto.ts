@@ -28,4 +28,13 @@ export class SubmitUserInfoDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  @ApiPropertyOptional({ description: 'Original filename of uploaded file' })
+  @IsOptional()
+  @IsString()
+  file_name?: string;
+
+  @ApiPropertyOptional({ description: 'File size in MB' })
+  @IsOptional()
+  file_size?: number;
 }

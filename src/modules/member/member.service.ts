@@ -165,7 +165,7 @@ export class MemberService {
    * Submit user information after OTP verification
    */
   async submitUserInfo(submitUserInfoDto: SubmitUserInfoDto): Promise<{ message: string }> {
-    const { email, otp, full_name, company_name, phone, note } = submitUserInfoDto;
+    const { email, otp, full_name, company_name, phone, note, file_name, file_size } = submitUserInfoDto;
 
     const member = await this.memberRepo.findOne({ where: { name: email } });
     if (!member) {
@@ -191,6 +191,8 @@ export class MemberService {
     verification.company_name = company_name;
     if (phone) verification.phone = phone;
     if (note) verification.note = note;
+    if (file_name) verification.file_name = file_name;
+    if (file_size) verification.file_size = file_size;
 
     await this.verificationRepo.save(verification);
 
@@ -377,5 +379,29 @@ export class MemberService {
       created_at: member.created_at,
       updated_at: member.updated_at
     };
+  }
+
+  /**
+   * Get all member verifications with member email
+   */
+  async getAllMemberVerifications(): Promise<any[]> {
+    const verifications = await this.verificationRepo.find({
+      relations: ['member'],
+      order: {
+        created_at: 'DESC'
+      }
+    });
+
+    return verifications.map(verification => ({
+      id: verification.id,
+      full_name: verification.full_name,
+      phone: verification.phone,
+      company_name: verification.company_name,
+      note: verification.note,
+      file_name: verification.file_name,
+      file_size: verification.file_size,
+      member_email: verification.member?.email || verification.member?.name,
+      created_at: verification.created_at
+    }));
   }
 }
