@@ -5,6 +5,7 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { Member } from '../../entities/member.entity';
+import { AppTotalGoTask } from '../../entities/app-total-go-task.entity';
 import { CreateMemberDto } from './dto/create-member.dto';
 import { GetMembersDto } from './dto/get-members.dto';
 import { AssignServicesDto } from './dto/assign-services.dto';
@@ -22,6 +23,8 @@ export class ExternalApiService {
     private readonly configService: ConfigService,
     @InjectRepository(Member)
     private readonly memberRepo: Repository<Member>,
+    @InjectRepository(AppTotalGoTask)
+    private readonly taskRepo: Repository<AppTotalGoTask>,
   ) {
     this.baseUrl = this.configService.get<string>('EXTERNAL_API_URL', '');
     this.apiKey = this.configService.get<string>('EXTERNAL_API_KEY', '');
@@ -186,6 +189,31 @@ export class ExternalApiService {
       );
       
       this.logger.log('SUCCESS Response:', response.data);
+      
+      // Save task to database for scheduler to track
+      if (response.data?.data?.id) {
+        try {
+          const taskId = response.data.data.id;
+          const member = await this.memberRepo.findOne({ where: { email: createAppTotalGoDto.memberName } });
+          
+          if (member) {
+            const newTask = this.taskRepo.create({
+              member_id: member.id,
+              external_task_id: taskId,
+              file_name: file.originalname,
+              status: 'InProgress', // Start with InProgress status
+            });
+            await this.taskRepo.save(newTask);
+            this.logger.log(`✅ Task saved to DB: ID=${taskId}, Member=${member.id}`);
+          } else {
+            this.logger.warn(`⚠️ Member not found for email ${createAppTotalGoDto.memberName}, task not saved`);
+          }
+        } catch (saveError) {
+          this.logger.error('Failed to save task to database:', saveError.message);
+          // Don't throw, just log - still return successful response to user
+        }
+      }
+      
       return response.data;
     } catch (error: any) {
       this.logger.error('FULL ERROR STACK:', error.stack);
@@ -212,6 +240,12 @@ export class ExternalApiService {
           { headers: this.getHeaders() },
         ),
       );
+      // Extract status from nested data object
+      // API returns: { code: '0', message: 'Success', data: { id: '20343', status: 'InProgress' } }
+      // We need to return: { status: 'InProgress' }
+      if (response.data?.data?.status) {
+        return { status: response.data.data.status };
+      }
       return response.data;
     } catch (error) {
       throw new HttpException('Failed to get AppTotalGo status', HttpStatus.BAD_REQUEST);

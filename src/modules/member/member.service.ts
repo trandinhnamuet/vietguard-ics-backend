@@ -88,6 +88,103 @@ export class MemberService {
   }
 
   /**
+   * Send report email with PDF attachment
+   */
+  async sendReportEmail(params: {
+    to: string;
+    taskId: string;
+    fileName: string;
+    fileBuffer: Buffer;
+    contentType: string;
+  }): Promise<void> {
+    const { to, taskId, fileName, fileBuffer, contentType } = params;
+
+    try {
+      const mailOptions = {
+        from: process.env.SMTP_FROM,
+        to: to,
+        subject: `VietGuardScan - Báo cáo quét hoàn tất (Task ID: ${taskId})`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <style>
+                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+                .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+                .info-box { background: white; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #667eea; }
+                .info-row { margin: 8px 0; }
+                .label { font-weight: bold; color: #555; }
+                .value { color: #333; }
+                .status { color: #10b981; font-weight: bold; }
+                .button { display: inline-block; background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin-top: 20px; }
+                .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="header">
+                  <h1>🛡️ VietGuardScan</h1>
+                  <p style="margin: 10px 0 0 0; font-size: 18px;">Báo cáo quét hoàn tất</p>
+                </div>
+                <div class="content">
+                  <h2>Kết quả quét của bạn đã sẵn sàng!</h2>
+                  <p>Xin chào,</p>
+                  <p>Quá trình quét bảo mật của bạn đã hoàn tất thành công. Báo cáo chi tiết được đính kèm trong email này.</p>
+                  
+                  <div class="info-box">
+                    <div class="info-row">
+                      <span class="label">Task ID:</span>
+                      <span class="value">${taskId}</span>
+                    </div>
+                    <div class="info-row">
+                      <span class="label">Tên file báo cáo:</span>
+                      <span class="value">${fileName}</span>
+                    </div>
+                    <div class="info-row">
+                      <span class="label">Trạng thái:</span>
+                      <span class="status">✓ Hoàn thành</span>
+                    </div>
+                    <div class="info-row">
+                      <span class="label">Kích thước file:</span>
+                      <span class="value">${(fileBuffer.length / 1024 / 1024).toFixed(2)} MB</span>
+                    </div>
+                  </div>
+
+                  <p>Báo cáo chứa kết quả phân tích bảo mật toàn diện. Vui lòng xem xét kỹ các thông tin trong báo cáo.</p>
+                  
+                  <p style="margin-top: 20px;">
+                    <a href="https://vietguardscan.icss.com.vn" class="button">Xem Dashboard</a>
+                  </p>
+                  
+                  <div class="footer">
+                    <p>Đây là email tự động từ VietGuardScan</p>
+                    <p>© 2025 VietGuardScan. All rights reserved.</p>
+                  </div>
+                </div>
+              </div>
+            </body>
+          </html>
+        `,
+        attachments: [
+          {
+            filename: fileName,
+            content: fileBuffer,
+            contentType: contentType,
+          },
+        ],
+      };
+
+      await this.transporter.sendMail(mailOptions);
+      console.log(`Report email sent successfully to ${to} for task ${taskId}`);
+    } catch (error) {
+      console.error(`Failed to send report email to ${to}:`, error);
+      throw new BadRequestException('Failed to send report email');
+    }
+  }
+
+  /**
    * Send OTP for verification
    */
   async sendOtp(sendOtpDto: SendOtpDto): Promise<{ message: string }> {
