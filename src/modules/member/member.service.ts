@@ -109,24 +109,33 @@ export class MemberService {
           <html>
             <head>
               <style>
-                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; }
                 .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
-                .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
-                .info-box { background: white; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #667eea; }
-                .info-row { margin: 8px 0; }
-                .label { font-weight: bold; color: #555; }
-                .value { color: #333; }
-                .status { color: #10b981; font-weight: bold; }
-                .button { display: inline-block; background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin-top: 20px; }
-                .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 40px 30px; text-align: center; border-radius: 10px 10px 0 0; }
+                .header h1 { margin: 0; font-size: 28px; }
+                .header p { margin: 10px 0 0 0; font-size: 16px; opacity: 0.95; }
+                .content { background: #ffffff; padding: 40px 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 10px 10px; }
+                .content h2 { color: #1f2937; margin-top: 0; font-size: 22px; }
+                .info-box { background: #f9fafb; padding: 20px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #667eea; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+                .info-row { margin: 12px 0; padding: 8px 0; border-bottom: 1px solid #e5e7eb; }
+                .info-row:last-child { border-bottom: none; }
+                .label { font-weight: 600; color: #4b5563; display: inline-block; min-width: 140px; }
+                .value { color: #1f2937; }
+                .status { color: #10b981; font-weight: 600; }
+                .file-name { color: #667eea; font-weight: 500; word-break: break-all; }
+                .button-container { text-align: center; margin: 35px 0 25px 0; }
+                .button { display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white !important; padding: 14px 40px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 6px rgba(102, 126, 234, 0.3); transition: transform 0.2s; }
+                .button:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(102, 126, 234, 0.4); }
+                .note { background: #eff6ff; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0; border-radius: 4px; color: #1e40af; font-size: 14px; }
+                .footer { text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }
+                .footer p { margin: 5px 0; }
               </style>
             </head>
             <body>
               <div class="container">
                 <div class="header">
                   <h1>🛡️ VietGuardScan</h1>
-                  <p style="margin: 10px 0 0 0; font-size: 18px;">Báo cáo quét hoàn tất</p>
+                  <p>Báo cáo quét hoàn tất</p>
                 </div>
                 <div class="content">
                   <h2>Kết quả quét của bạn đã sẵn sàng!</h2>
@@ -140,7 +149,7 @@ export class MemberService {
                     </div>
                     <div class="info-row">
                       <span class="label">Tên file báo cáo:</span>
-                      <span class="value">${fileName}</span>
+                      <span class="file-name">${fileName}</span>
                     </div>
                     <div class="info-row">
                       <span class="label">Trạng thái:</span>
@@ -152,11 +161,15 @@ export class MemberService {
                     </div>
                   </div>
 
+                  <div class="note">
+                    📎 <strong>File đính kèm:</strong> ${fileName}
+                  </div>
+
                   <p>Báo cáo chứa kết quả phân tích bảo mật toàn diện. Vui lòng xem xét kỹ các thông tin trong báo cáo.</p>
                   
-                  <p style="margin-top: 20px;">
-                    <a href="https://vietguardscan.icss.com.vn" class="button">Xem Dashboard</a>
-                  </p>
+                  <div class="button-container">
+                    <a href="https://vietguardscan.icss.com.vn" class="button">📥 Tải về báo cáo</a>
+                  </div>
                   
                   <div class="footer">
                     <p>Đây là email tự động từ VietGuardScan</p>
