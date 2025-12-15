@@ -6,7 +6,7 @@ import { GetMembersDto } from '../dto/get-members.dto';
 import { AssignServicesDto } from '../dto/assign-services.dto';
 
 @ApiTags('Members')
-@Controller('api/members')
+@Controller('members')
 export class MembersController {
   constructor(private readonly externalApiService: ExternalApiService) {}
 

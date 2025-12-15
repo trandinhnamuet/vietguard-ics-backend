@@ -4,7 +4,7 @@ import { Response } from 'express';
 import { ExternalApiService } from '../external-api.service';
 
 @ApiTags('Dealers')
-@Controller('api/dealers')
+@Controller('dealers')
 export class DealersController {
   constructor(private readonly externalApiService: ExternalApiService) {}
 

@@ -20,7 +20,7 @@ import { CreateAppTotalGoDto } from '../dto/create-app-total-go.dto';
 import { GetAppTotalGoHistoryDto } from '../dto/get-app-total-go-history.dto';
 
 @ApiTags('Service')
-@Controller('api/service')
+@Controller('service')
 export class ServiceController {
     private readonly logger = new Logger(ServiceController.name);
     

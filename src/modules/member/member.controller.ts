@@ -14,7 +14,7 @@ import { SubmitUserInfoDto } from '../../dto/submit-user-info.dto';
 import { CreateMemberWithServiceDto } from '../../dto/create-member-with-service.dto';
 
 @ApiTags('Members')
-@Controller('api/members')
+@Controller('members')
 export class MemberController {
   constructor(private readonly memberService: MemberService) { }
 
