@@ -162,13 +162,14 @@ export class MemberService {
                   </div>
 
                   <div class="note">
-                    📎 <strong>File đính kèm:</strong> ${fileName}
+                    📎 <strong>File đính kèm:</strong> ${fileName}<br/>
+                    <small style="color: #6b7280; margin-top: 5px; display: block;">Bạn có thể mở file trực tiếp từ phần đính kèm email hoặc tải về qua link bên dưới.</small>
                   </div>
 
                   <p>Báo cáo chứa kết quả phân tích bảo mật toàn diện. Vui lòng xem xét kỹ các thông tin trong báo cáo.</p>
                   
                   <div class="button-container">
-                    <a href="https://vietguardscan.icss.com.vn" class="button">📥 Tải về báo cáo</a>
+                    <a href="https://vietguardscan.icss.com.vn/api/service/app-total-go/files/${taskId}" class="button" download="${fileName}">📥 Tải về báo cáo</a>
                   </div>
                   
                   <div class="footer">
