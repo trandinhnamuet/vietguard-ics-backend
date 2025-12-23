@@ -25,9 +25,6 @@ async function bootstrap() {
     console.log('Starting NestJS application...');
     const app = await NestFactory.create(AppModule);
     
-    // Set global prefix
-    app.setGlobalPrefix('api');
-    
     // Enable CORS for all origins
     app.enableCors({
       origin: '*',
