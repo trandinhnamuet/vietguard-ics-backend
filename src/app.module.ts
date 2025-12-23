@@ -6,6 +6,7 @@ import { AppService } from './app.service';
 import { ExternalApiModule } from './modules/external-api/external-api.module';
 import { MemberModule } from './modules/member/member.module';
 import { SchedulerModule } from './modules/scheduler/scheduler.module';
+import { AccessLogModule } from './modules/access-log/access-log.module';
 import { AppDataSource } from '../data-source';
 
 @Module({
@@ -17,6 +18,7 @@ import { AppDataSource } from '../data-source';
     ExternalApiModule,
     MemberModule,
     SchedulerModule,
+    AccessLogModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -7,6 +7,7 @@ import { MemberService as MemberServiceEntity } from '../../entities/member-serv
 import { AppTotalGoTask } from '../../entities/app-total-go-task.entity';
 import { DownloadToken } from '../../entities/download-token.entity';
 import { ExternalApiService } from '../external-api/external-api.service';
+import { AccessLogService } from '../access-log/access-log.service';
 import { SendOtpDto } from '../../dto/send-otp.dto';
 import { VerifyOtpDto } from '../../dto/verify-otp.dto';
 import { SubmitUserInfoDto } from '../../dto/submit-user-info.dto';
@@ -31,6 +32,7 @@ export class MemberService {
     @InjectRepository(DownloadToken)
     private readonly downloadTokenRepo: Repository<DownloadToken>,
     private readonly externalApiService: ExternalApiService,
+    private readonly accessLogService: AccessLogService,
   ) {
     // Initialize email transporter with SMTP config from environment
     this.transporter = nodemailer.createTransport({
@@ -388,7 +390,7 @@ export class MemberService {
    * Verify OTP
    */
   async verifyOtp(verifyOtpDto: VerifyOtpDto): Promise<{ message: string; verified: boolean }> {
-    const { email, otp } = verifyOtpDto;
+    const { email, otp, ipv4, ipv6 } = verifyOtpDto;
 
     const member = await this.memberRepo.findOne({ where: { name: email } });
     if (!member) {
@@ -418,6 +420,16 @@ export class MemberService {
     // Mark as verified
     verification.otp_verified = true;
     await this.verificationRepo.save(verification);
+
+    // Update email in access logs for this IP
+    if (ipv4 || ipv6) {
+      try {
+        await this.accessLogService.updateEmailByIp(ipv4, ipv6, email);
+      } catch (error) {
+        console.error('Failed to update email in access logs:', error);
+        // Don't throw error, just log it - OTP verification was successful
+      }
+    }
 
     return { message: 'OTP verified successfully', verified: true };
   }

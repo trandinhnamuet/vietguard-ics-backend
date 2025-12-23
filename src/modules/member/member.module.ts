@@ -8,6 +8,7 @@ import { DownloadToken } from '../../entities/download-token.entity';
 import { MemberService } from './member.service';
 import { MemberController } from './member.controller';
 import { ExternalApiModule } from '../external-api/external-api.module';
+import { AccessLogModule } from '../access-log/access-log.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { ExternalApiModule } from '../external-api/external-api.module';
       DownloadToken,
     ]),
     ExternalApiModule,
+    AccessLogModule,
   ],
   controllers: [MemberController],
   providers: [MemberService],
