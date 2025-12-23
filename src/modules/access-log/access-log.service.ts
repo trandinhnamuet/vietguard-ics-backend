@@ -21,29 +21,39 @@ export class AccessLogService {
 
   /**
    * Record access - create new or update existing
+   * Priority: IPv6 > IPv4 for user identification
+   * If IPv6 exists, use it as primary identifier (device-specific)
+   * If no IPv6, use IPv4 as identifier
    */
   async recordAccess(dto: RecordAccessDto): Promise<AccessLog> {
     const { ipv4, ipv6 } = dto;
 
-    // Build where conditions for finding existing record
-    const whereConditions: FindOptionsWhere<AccessLog>[] = [];
-    if (ipv4) whereConditions.push({ ipv4 });
-    if (ipv6) whereConditions.push({ ipv6 });
-
-    let accessLog: AccessLog | null = null;
+    // Determine primary identifier (IPv6 > IPv4)
+    const primaryIdentifier = ipv6 || ipv4;
     
-    if (whereConditions.length > 0) {
-      accessLog = await this.accessLogRepo.findOne({
-        where: whereConditions,
-      });
+    if (!primaryIdentifier) {
+      throw new Error('At least IPv4 or IPv6 is required');
     }
+
+    // Build where condition based on primary identifier
+    const whereCondition: FindOptionsWhere<AccessLog> = ipv6 
+      ? { ipv6 }  // If IPv6 exists, match by IPv6 (device-specific)
+      : { ipv4 }; // Otherwise match by IPv4
+
+    let accessLog = await this.accessLogRepo.findOne({
+      where: whereCondition,
+    });
 
     if (accessLog) {
       // Update existing record
       accessLog.access_count += 1;
       accessLog.last_access_time = new Date();
+      
+      // Store both IPs if we have them
       if (ipv4 && !accessLog.ipv4) accessLog.ipv4 = ipv4;
       if (ipv6 && !accessLog.ipv6) accessLog.ipv6 = ipv6;
+      
+      console.log(`[AccessLog] Updated: Primary=${ipv6 ? 'IPv6' : 'IPv4'}(${primaryIdentifier}), Count=${accessLog.access_count}`);
     } else {
       // Create new record
       accessLog = new AccessLog();
@@ -51,28 +61,39 @@ export class AccessLogService {
       accessLog.ipv6 = ipv6 || null;
       accessLog.access_count = 1;
       accessLog.last_access_time = new Date();
+      
+      console.log(`[AccessLog] Created: Primary=${ipv6 ? 'IPv6' : 'IPv4'}(${primaryIdentifier}), IPv4=${ipv4 || 'N/A'}, IPv6=${ipv6 || 'N/A'}`);
     }
 
     return await this.accessLogRepo.save(accessLog);
   }
 
   /**
-   * Update email for IP
+   * Update email for IP/IPv6
+   * Priority: IPv6 > IPv4 for user identification
    */
   async updateEmailByIp(ipv4: string | undefined, ipv6: string | undefined, email: string): Promise<void> {
-    const whereConditions: FindOptionsWhere<AccessLog>[] = [];
-    if (ipv4) whereConditions.push({ ipv4 });
-    if (ipv6) whereConditions.push({ ipv6 });
+    // Determine primary identifier (IPv6 > IPv4)
+    const primaryIdentifier = ipv6 || ipv4;
+    
+    if (!primaryIdentifier) {
+      console.warn('[AccessLog] updateEmailByIp: No IPv4 or IPv6 provided');
+      return;
+    }
 
-    if (whereConditions.length === 0) return;
+    // Build where condition based on primary identifier
+    const whereCondition: FindOptionsWhere<AccessLog> = ipv6 
+      ? { ipv6 }  // If IPv6 exists, match by IPv6
+      : { ipv4 }; // Otherwise match by IPv4
 
     const accessLog = await this.accessLogRepo.findOne({
-      where: whereConditions,
+      where: whereCondition,
     });
 
     if (accessLog && !accessLog.email) {
       accessLog.email = email;
       await this.accessLogRepo.save(accessLog);
+      console.log(`[AccessLog] Email updated: Primary=${ipv6 ? 'IPv6' : 'IPv4'}(${primaryIdentifier}), Email=${email}`);
     }
   }
 

@@ -18,16 +18,20 @@ export class AccessLogController {
   @Post('record')
   @ApiOperation({
     summary: 'Record access',
-    description: 'Record user access with IP address',
+    description: 'Record user access with IP address. Identification priority: IPv6 (device-specific) > IPv4',
   })
   @ApiResponse({ status: 201, description: 'Access recorded successfully' })
   async recordAccess(@Body(ValidationPipe) dto: RecordAccessDto) {
     const result = await this.accessLogService.recordAccess(dto);
+    const primaryId = dto.ipv6 ? `IPv6(${dto.ipv6})` : `IPv4(${dto.ipv4})`;
     return {
       message: 'Access recorded successfully',
       data: {
         id: result.id,
         access_count: result.access_count,
+        primaryIdentifier: primaryId,
+        ipv4: result.ipv4,
+        ipv6: result.ipv6,
       },
     };
   }
@@ -62,11 +66,16 @@ export class AccessLogController {
   @Get('count')
   @ApiOperation({
     summary: 'Get total access count',
-    description: 'Get total number of unique visitors',
+    description: 'Get total number of unique visitors (identified by IPv6 if available, otherwise IPv4)',
   })
   @ApiResponse({ status: 200, description: 'Total count retrieved successfully' })
   async getTotalCount() {
     const count = await this.accessLogService.getTotalCount();
-    return { total: count };
+    return { 
+      total: count,
+      uniqueIPs: count,
+      totalAccessCount: count,
+      note: 'Each record represents a unique device (identified by IPv6 if available, otherwise by IPv4)'
+    };
   }
 }
