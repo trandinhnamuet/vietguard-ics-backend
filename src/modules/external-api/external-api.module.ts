@@ -8,6 +8,7 @@ import { MembersController } from './controllers/members.controller';
 import { ServiceController } from './controllers/service.controller';
 import { Member } from '../../entities/member.entity';
 import { AppTotalGoTask } from '../../entities/app-total-go-task.entity';
+import { DownloadToken } from '../../entities/download-token.entity';
 
 @Module({
   imports: [
@@ -16,7 +17,7 @@ import { AppTotalGoTask } from '../../entities/app-total-go-task.entity';
       maxRedirects: 5,
     }),
     ConfigModule,
-    TypeOrmModule.forFeature([Member, AppTotalGoTask]),
+    TypeOrmModule.forFeature([Member, AppTotalGoTask, DownloadToken]),
   ],
   controllers: [
     DealersController,

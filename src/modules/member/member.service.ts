@@ -5,6 +5,7 @@ import { Member } from '../../entities/member.entity';
 import { MemberVerification } from '../../entities/member-verification.entity';
 import { MemberService as MemberServiceEntity } from '../../entities/member-service.entity';
 import { AppTotalGoTask } from '../../entities/app-total-go-task.entity';
+import { DownloadToken } from '../../entities/download-token.entity';
 import { ExternalApiService } from '../external-api/external-api.service';
 import { SendOtpDto } from '../../dto/send-otp.dto';
 import { VerifyOtpDto } from '../../dto/verify-otp.dto';
@@ -12,6 +13,7 @@ import { SubmitUserInfoDto } from '../../dto/submit-user-info.dto';
 import { CreateMemberWithServiceDto } from '../../dto/create-member-with-service.dto';
 import { CreateTaskDto } from '../../dto/create-task.dto';
 import * as nodemailer from 'nodemailer';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class MemberService {
@@ -26,6 +28,8 @@ export class MemberService {
     private readonly memberServiceRepo: Repository<MemberServiceEntity>,
     @InjectRepository(AppTotalGoTask)
     private readonly taskRepo: Repository<AppTotalGoTask>,
+    @InjectRepository(DownloadToken)
+    private readonly downloadTokenRepo: Repository<DownloadToken>,
     private readonly externalApiService: ExternalApiService,
   ) {
     // Initialize email transporter with SMTP config from environment
@@ -45,6 +49,32 @@ export class MemberService {
    */
   private generateOtp(): string {
     return Math.floor(100000 + Math.random() * 900000).toString();
+  }
+
+  /**
+   * Generate secure random token
+   */
+  private generateSecureToken(): string {
+    return crypto.randomBytes(32).toString('hex');
+  }
+
+  /**
+   * Create download token for task (valid for 7 days)
+   */
+  private async createDownloadToken(taskId: string): Promise<string> {
+    const token = this.generateSecureToken();
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7); // Token valid for 7 days
+
+    const downloadToken = this.downloadTokenRepo.create({
+      task_id: taskId,
+      token: token,
+      expires_at: expiresAt,
+      used: false,
+    });
+
+    await this.downloadTokenRepo.save(downloadToken);
+    return token;
   }
 
   /**
@@ -100,6 +130,11 @@ export class MemberService {
     const { to, taskId, fileName, fileBuffer, contentType } = params;
 
     try {
+      // Create secure download token
+      const downloadToken = await this.createDownloadToken(taskId);
+      const baseUrl = process.env.APP_URL || 'http://localhost:3000';
+      const downloadUrl = `${baseUrl}/api/service/app-total-go/download/${downloadToken}`;
+
       const mailOptions = {
         from: process.env.SMTP_FROM,
         to: to,
@@ -169,8 +204,12 @@ export class MemberService {
                   <p>Báo cáo chứa kết quả phân tích bảo mật toàn diện. Vui lòng xem xét kỹ các thông tin trong báo cáo.</p>
                   
                   <div class="button-container">
-                    <a href="https://vietguardscan.icss.com.vn/api/service/app-total-go/files/${taskId}" class="button" download="${fileName}">📥 Tải về báo cáo</a>
+                    <a href="${downloadUrl}" class="button" target="_blank">📥 Tải về báo cáo</a>
                   </div>
+                  
+                  <p style="text-align: center; color: #6b7280; font-size: 14px; margin-top: 20px;">
+                    <small>⏰ Link tải có hiệu lực trong 7 ngày. Chỉ người nhận email này mới có thể tải báo cáo.</small>
+                  </p>
                   
                   <div class="footer">
                     <p>Đây là email tự động từ VietGuardScan</p>
@@ -195,6 +234,117 @@ export class MemberService {
     } catch (error) {
       console.error(`Failed to send report email to ${to}:`, error);
       throw new BadRequestException('Failed to send report email');
+    }
+  }
+
+  /**
+   * Send error notification email when scan fails
+   */
+  async sendErrorEmail(params: {
+    to: string;
+    taskId: string;
+  }): Promise<void> {
+    const { to, taskId } = params;
+
+    try {
+      const mailOptions = {
+        from: process.env.SMTP_FROM,
+        to: to,
+        subject: `VietGuardScan - Quét không thành công (Task ID: ${taskId})`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <style>
+                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; }
+                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                .header { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; padding: 40px 30px; text-align: center; border-radius: 10px 10px 0 0; }
+                .header h1 { margin: 0; font-size: 28px; }
+                .header p { margin: 10px 0 0 0; font-size: 16px; opacity: 0.95; }
+                .content { background: #ffffff; padding: 40px 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 10px 10px; }
+                .content h2 { color: #1f2937; margin-top: 0; font-size: 22px; }
+                .error-box { background: #fef2f2; padding: 20px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #ef4444; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+                .info-row { margin: 12px 0; padding: 8px 0; border-bottom: 1px solid #fee2e2; }
+                .info-row:last-child { border-bottom: none; }
+                .label { font-weight: 600; color: #4b5563; display: inline-block; min-width: 140px; }
+                .value { color: #1f2937; }
+                .status { color: #ef4444; font-weight: 600; }
+                .note { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px; color: #92400e; font-size: 14px; }
+                .button-container { text-align: center; margin: 35px 0 25px 0; }
+                .button { display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white !important; padding: 14px 40px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 6px rgba(102, 126, 234, 0.3); transition: transform 0.2s; }
+                .button:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(102, 126, 234, 0.4); }
+                .footer { text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }
+                .footer p { margin: 5px 0; }
+                .support { background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 25px 0; }
+                .support h3 { margin-top: 0; color: #1f2937; font-size: 18px; }
+                .support p { margin: 8px 0; color: #4b5563; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="header">
+                  <h1>⚠️ VietGuardScan</h1>
+                  <p>Thông báo quét không thành công</p>
+                </div>
+                <div class="content">
+                  <h2>Đã có lỗi xảy ra trong quá trình quét</h2>
+                  <p>Xin chào,</p>
+                  <p>Rất tiếc, quá trình quét bảo mật của bạn không thể hoàn thành do file APK của bạn có vấn đề về cấu trúc hoặc chưa có chữ ký.</p>
+                  
+                  <div class="error-box">
+                    <div class="info-row">
+                      <span class="label">Task ID:</span>
+                      <span class="value">${taskId}</span>
+                    </div>
+                    <div class="info-row">
+                      <span class="label">Trạng thái:</span>
+                      <span class="status">✗ Quét không thành công</span>
+                    </div>
+                    <div class="info-row">
+                      <span class="label">Lý do:</span>
+                      <span class="value">File APK sai cấu trúc hoặc chưa có chữ ký</span>
+                    </div>
+                  </div>
+
+                  <div class="note">
+                    ⚠️ <strong>Nguyên nhân có thể:</strong><br/>
+                    • File APK không đúng định dạng<br/>
+                    • File APK bị hỏng hoặc không hoàn chỉnh<br/>
+                    • File APK chưa được ký (unsigned APK)<br/>
+                    • File không phải là file APK hợp lệ
+                  </div>
+
+                  <div class="support">
+                    <h3>🔧 Hướng dẫn khắc phục:</h3>
+                    <p><strong>1.</strong> Kiểm tra lại file APK của bạn có đúng định dạng và hoàn chỉnh không</p>
+                    <p><strong>2.</strong> Đảm bảo file APK đã được ký (signed APK)</p>
+                    <p><strong>3.</strong> Thử build lại file APK từ source code</p>
+                    <p><strong>4.</strong> Upload lại file APK mới và thử quét lại</p>
+                  </div>
+                  
+                  <div class="button-container">
+                    <a href="https://vietguardscan.icss.com.vn" class="button">🔄 Thử quét lại</a>
+                  </div>
+
+                  <p style="margin-top: 30px;">Nếu bạn cần hỗ trợ thêm, vui lòng liên hệ với chúng tôi qua email hoặc hotline.</p>
+                  
+                  <div class="footer">
+                    <p><strong>Hỗ trợ:</strong> support@vietguardscan.com | <strong>Hotline:</strong> 1900-xxxx</p>
+                    <p>Đây là email tự động từ VietGuardScan</p>
+                    <p>© 2025 VietGuardScan. All rights reserved.</p>
+                  </div>
+                </div>
+              </div>
+            </body>
+          </html>
+        `,
+      };
+
+      await this.transporter.sendMail(mailOptions);
+      console.log(`Error notification email sent successfully to ${to} for task ${taskId}`);
+    } catch (error) {
+      console.error(`Failed to send error email to ${to}:`, error);
+      throw new BadRequestException('Failed to send error notification email');
     }
   }
 

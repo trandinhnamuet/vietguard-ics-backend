@@ -95,6 +95,14 @@ export class SchedulerService {
       } else if (status.status === 'Success' && previousStatus === 'Success') {
         this.logger.debug(`[SKIP] Task ${task.external_task_id} already success and email sent`);
       }
+      
+      // If task failed and status changed, send error notification email
+      if (status.status === 'Failed' && previousStatus !== 'Failed') {
+        this.logger.log(`[FAILED] Task ${task.external_task_id} failed! Sending error notification email to ${memberEmail}...`);
+        await this.sendErrorEmail(task);
+      } else if (status.status === 'Failed' && previousStatus === 'Failed') {
+        this.logger.debug(`[SKIP] Task ${task.external_task_id} already failed and email sent`);
+      }
 
       const taskDuration = Date.now() - taskStartTime;
       this.logger.debug(`[DONE] Task ${task.external_task_id} check completed in ${taskDuration}ms`);
@@ -156,6 +164,39 @@ export class SchedulerService {
       this.logger.error(`[EMAIL] Error sending report email for task ${task.external_task_id}:`, error.message);
       // Don't change task status to failed, just log the email error
       // Task is still successful, just email delivery failed
+    }
+  }
+
+  /**
+   * Send error notification email to user when scan fails
+   */
+  private async sendErrorEmail(task: AppTotalGoTask) {
+    const emailStartTime = Date.now();
+    try {
+      const memberEmail = task.member?.email || task.member?.name;
+      
+      if (!memberEmail) {
+        this.logger.error(`[EMAIL] Cannot send error notification for task ${task.external_task_id}: member email not found`);
+        return;
+      }
+
+      this.logger.log(`[EMAIL] Sending error notification for task ${task.external_task_id}...`);
+
+      // Send error notification email using mail service
+      const mailStart = Date.now();
+      await this.memberService.sendErrorEmail({
+        to: memberEmail,
+        taskId: task.external_task_id,
+      });
+      const mailDuration = Date.now() - mailStart;
+
+      this.logger.log(`[EMAIL] Error notification email sent successfully to ${memberEmail} for task ${task.external_task_id} (took ${mailDuration}ms)`);
+      
+      const totalDuration = Date.now() - emailStartTime;
+      this.logger.log(`[EMAIL] Complete error notification process for task ${task.external_task_id} took ${totalDuration}ms total`);
+    } catch (error) {
+      this.logger.error(`[EMAIL] Error sending error notification email for task ${task.external_task_id}:`, error.message);
+      // Don't change task status, just log the email error
     }
   }
 }
