@@ -206,7 +206,7 @@ export class MemberService {
                   <p>Báo cáo chứa kết quả phân tích bảo mật toàn diện. Vui lòng xem xét kỹ các thông tin trong báo cáo.</p>
                   
                   <div class="button-container">
-                    <a href="${downloadUrl}" class="button" target="_blank">📥 Tải về báo cáo</a>
+                    <a href="${downloadUrl}" class="button">📥 Tải về báo cáo</a>
                   </div>
                   
                   <p style="text-align: center; color: #6b7280; font-size: 14px; margin-top: 20px;">

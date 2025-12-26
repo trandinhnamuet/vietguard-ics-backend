@@ -48,6 +48,9 @@ export class ExternalApiService {
         this.httpService.get(`${this.baseUrl.replace(/\/$/, '')}/api/dealers/export-service-usage-logs`, {
           headers: this.getHeaders(),
           responseType: 'arraybuffer',
+          timeout: 120000, // 2 minutes timeout for export
+          maxContentLength: 50 * 1024 * 1024, // 50MB max file size
+          maxBodyLength: 50 * 1024 * 1024, // 50MB max body size
         }),
       );
       return Buffer.from(response.data);
@@ -271,6 +274,9 @@ export class ExternalApiService {
           {
             headers: headers,
             responseType: 'arraybuffer',
+            timeout: 300000, // 5 minutes timeout for large PDF files
+            maxContentLength: 100 * 1024 * 1024, // 100MB max file size
+            maxBodyLength: 100 * 1024 * 1024, // 100MB max body size
           },
         ),
       );
