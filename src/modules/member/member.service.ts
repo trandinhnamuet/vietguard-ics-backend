@@ -135,7 +135,7 @@ export class MemberService {
       // Create secure download token
       const downloadToken = await this.createDownloadToken(taskId);
       const baseUrl = process.env.APP_URL || 'http://localhost:3000';
-      const downloadUrl = `${baseUrl}/api/service/app-total-go/download/${downloadToken}`;
+      const downloadUrl = `${baseUrl}/service/app-total-go/download/${downloadToken}`;
 
       const mailOptions = {
         from: process.env.SMTP_FROM,
