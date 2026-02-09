@@ -35,14 +35,19 @@ export class MemberService {
     private readonly accessLogService: AccessLogService,
   ) {
     // Initialize email transporter with SMTP config from environment
+    const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
     this.transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || '587', 10),
-      secure: false, // true for 465, false for other ports
+      port: smtpPort,
+      secure: smtpPort === 465, // true for 465 (SSL), false for other ports (587 uses STARTTLS)
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
       },
+      // Add timeout and retry settings
+      connectionTimeout: 10000, // 10 seconds
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
     });
   }
 
