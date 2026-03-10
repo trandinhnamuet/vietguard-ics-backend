@@ -4,11 +4,13 @@ import {
   Post,
   Body,
   Query,
+  UseGuards,
   ValidationPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiHeader } from '@nestjs/swagger';
 import { AccessLogService, PaginatedAccessLogs } from './access-log.service';
 import { RecordAccessDto } from '../../dto/record-access.dto';
+import { AdminGuard } from '../admin/admin.guard';
 
 @ApiTags('Access Logs')
 @Controller('access-logs')
@@ -37,10 +39,12 @@ export class AccessLogController {
   }
 
   @Get()
+  @UseGuards(AdminGuard)
   @ApiOperation({
     summary: 'Get all access logs',
     description: 'Get all access logs with pagination, sorting, and search',
   })
+  @ApiHeader({ name: 'x-admin-password', description: 'Admin password', required: true })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page' })
   @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Sort by field' })
@@ -64,10 +68,12 @@ export class AccessLogController {
   }
 
   @Get('count')
+  @UseGuards(AdminGuard)
   @ApiOperation({
     summary: 'Get total access count',
     description: 'Get total number of unique visitors (identified by IPv6 if available, otherwise IPv4)',
   })
+  @ApiHeader({ name: 'x-admin-password', description: 'Admin password', required: true })
   @ApiResponse({ status: 200, description: 'Total count retrieved successfully' })
   async getTotalCount() {
     const count = await this.accessLogService.getTotalCount();

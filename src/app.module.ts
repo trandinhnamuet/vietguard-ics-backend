@@ -7,6 +7,7 @@ import { ExternalApiModule } from './modules/external-api/external-api.module';
 import { MemberModule } from './modules/member/member.module';
 import { SchedulerModule } from './modules/scheduler/scheduler.module';
 import { AccessLogModule } from './modules/access-log/access-log.module';
+import { AdminModule } from './modules/admin/admin.module';
 import { AppDataSource } from '../data-source';
 
 @Module({
@@ -19,6 +20,7 @@ import { AppDataSource } from '../data-source';
     MemberModule,
     SchedulerModule,
     AccessLogModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [AppService],
