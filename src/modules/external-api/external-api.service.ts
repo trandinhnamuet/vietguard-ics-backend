@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
+import { replaceFirstPageLogo } from '../../utils/pdf-logo-replacer';
 import { Member } from '../../entities/member.entity';
 import { AppTotalGoTask } from '../../entities/app-total-go-task.entity';
 import { CreateMemberDto } from './dto/create-member.dto';
@@ -294,6 +295,10 @@ export class ExternalApiService {
         contentType = 'application/pdf';
         filename = `${filename}.pdf`;
         this.logger.log('File type detected: PDF');
+        // Replace the vendor logo on the first page with our own logo
+        this.logger.log('Replacing first-page logo in PDF...');
+        const processedBuffer = await replaceFirstPageLogo(fileBuffer);
+        return { buffer: processedBuffer, contentType, filename };
       }
       // Check for ZIP (50 4B 03 04 = PK..)
       else if (fileBuffer[0] === 0x50 && fileBuffer[1] === 0x4B && fileBuffer[2] === 0x03 && fileBuffer[3] === 0x04) {
