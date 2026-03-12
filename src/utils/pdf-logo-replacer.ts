@@ -204,6 +204,28 @@ export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
         }
         let text = bytes.toString('binary');
 
+        // Detect and adjust any "Scanned Time: YYYY-MM-DD HH:MM:SS" timestamps
+        // (source is Taiwan time, UTC+8). Subtract 1 hour to convert to Vietnam
+        // time (UTC+7). If decrement crosses day boundaries, Date handles it.
+        const scannedTimeRegex = /(\(?Scanned Time:\s*)(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})(\)?)/g;
+        let scannedReplaced = false;
+        text = text.replace(scannedTimeRegex, (_m, prefix, Y, Mo, D, hh, mm, ss, suffix) => {
+          const year = parseInt(Y, 10);
+          const month = parseInt(Mo, 10) - 1;
+          const day = parseInt(D, 10);
+          const hour = parseInt(hh, 10);
+          const minute = parseInt(mm, 10);
+          const second = parseInt(ss, 10);
+          const dt = new Date(year, month, day, hour, minute, second);
+          dt.setHours(dt.getHours() - 1);
+          const pad = (n: number) => n.toString().padStart(2, '0');
+          const newDate = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+          const newTime = `${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`;
+          scannedReplaced = true;
+          return `${prefix}${newDate} ${newTime}${suffix || ''}`;
+        });
+        if (scannedReplaced) logger.log("Adjusted 'Scanned Time' timestamps to Vietnam time (-1h)");
+
         // Aggressively remove any variants that draw /X1 to prevent the original
         // content from re-drawing the background. This pattern covers optional
         // preceding graphics-state calls (`/... gs`) and optional `cm` matrices.
