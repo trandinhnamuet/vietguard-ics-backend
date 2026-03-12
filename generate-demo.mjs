@@ -7,6 +7,9 @@ const deflate = promisify(zlib.deflate);
 
 function getPng(buf) { return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) }; }
 
+/** Tạm thời tắt thay hình nền trang đầu — đổi thành true để bật lại */
+const REPLACE_BACKGROUND = false;
+
 async function run() {
   const inPath = 'vneid-before.pdf';
   const outPath = 'vneid-demo.pdf';
@@ -33,7 +36,7 @@ async function run() {
   const bgPath = 'public/background.png';
   let newBg = null;
   let bgW = 0, bgH = 0;
-  if (fs.existsSync(bgPath)) {
+  if (REPLACE_BACKGROUND && fs.existsSync(bgPath)) {
     const bgBuf = fs.readFileSync(bgPath);
     ({ w: bgW, h: bgH } = getPng(bgBuf));
     newBg = await pdfDoc.embedPng(bgBuf);

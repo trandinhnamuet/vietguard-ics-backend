@@ -10,6 +10,9 @@ const deflate = promisify(zlib.deflate);
 
 const logger = new Logger('PdfLogoReplacer');
 
+/** Tạm thời tắt thay hình nền trang đầu — đổi thành true để bật lại */
+const REPLACE_BACKGROUND = false;
+
 /** Đọc kích thước pixel từ PNG header (offset 16–20) */
 function getPngDimensions(buf: Buffer): { width: number; height: number } {
   return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
@@ -35,7 +38,7 @@ export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
     logger.log(`Logo: ${logoW}×${logoH} px`);
 
     const bgPath = path.join(process.cwd(), 'public', 'background.png');
-    const hasBg = fs.existsSync(bgPath);
+    const hasBg = REPLACE_BACKGROUND && fs.existsSync(bgPath);
     let bgBuffer: Buffer | null = null;
     let bgW = 0, bgH = 0;
     if (hasBg) {
