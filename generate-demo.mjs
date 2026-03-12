@@ -137,6 +137,71 @@ async function run() {
     rawStream.dict.set(PDFName.of('Length'), pdfDoc.context.obj(newBytes.length));
   }
 
+  // Bước 3: Sửa Scanned Time (UTC+8 Đài Loan → UTC+7 Việt Nam, -1 giờ)
+  // PDF dùng TJ với kerning: [(Scann)1(e)-1(d)1( Time: ...)...] TJ -> cần ghép các phần lại
+  {
+    const allContentsObj = pdfDoc.context.lookup(firstPage.node.get(PDFName.of('Contents')));
+    const allStreams = [];
+    if (allContentsObj instanceof PDFRawStream) allStreams.push(allContentsObj);
+    else if (allContentsObj instanceof PDFArray) {
+      for (let i = 0; i < allContentsObj.size(); i++) {
+        const e = pdfDoc.context.lookup(allContentsObj.get(i));
+        if (e instanceof PDFRawStream) allStreams.push(e);
+      }
+    }
+    console.log(`[ScannedTime] Kiểm tra ${allStreams.length} content stream`);
+
+    for (const stream of allStreams) {
+      const isZ = stream.dict.get(PDFName.of('Filter'))?.toString() === '/FlateDecode';
+      let bytes = Buffer.from(stream.contents);
+      if (isZ) { try { bytes = await inflate(bytes); } catch { continue; } }
+      let text = bytes.toString('binary');
+
+      if (!text.includes('Scann')) continue;
+
+      // Match TJ array chứa "Scann" (bất kể cách split)
+      const tjRegex = /\[([^[\]]*Scann[^[\]]*)]\s*TJ/g;
+      const fixed = text.replace(tjRegex, (fullMatch, tjContent) => {
+        const parts = [];
+        const partRe = /\(([^)]*)\)/g;
+        let pm;
+        while ((pm = partRe.exec(tjContent)) !== null) parts.push(pm[1]);
+        const fullText = parts.join('');
+        console.log(`[ScannedTime] TJ text được ghép: ${JSON.stringify(fullText)}`);
+
+        const dtM = /(\d{4}-\d{2}-\d{2}) (\d{2}):(\d{2}):(\d{2})/.exec(fullText);
+        if (!dtM) {
+          console.log(`[ScannedTime] Không tìm thấy datetime trong: ${JSON.stringify(fullText)}`);
+          return fullMatch;
+        }
+
+        let hour = parseInt(dtM[2], 10) - 1;
+        let dateStr = dtM[1];
+        if (hour < 0) {
+          hour = 23;
+          const d = new Date(dateStr + 'T00:00:00Z');
+          d.setUTCDate(d.getUTCDate() - 1);
+          dateStr = d.toISOString().slice(0, 10);
+        }
+        const newFullText = fullText.replace(
+          dtM[0],
+          `${dateStr} ${String(hour).padStart(2, '0')}:${dtM[3]}:${dtM[4]}`,
+        );
+        console.log(`[ScannedTime] Sửa: "${dtM[0]}" → "${dateStr} ${String(hour).padStart(2, '0')}:${dtM[3]}:${dtM[4]}"`);
+        return `(${newFullText}) Tj`;
+      });
+
+      if (fixed !== text) {
+        const nb = isZ ? await deflate(Buffer.from(fixed, 'binary')) : Buffer.from(fixed, 'binary');
+        stream['contents'] = new Uint8Array(nb);
+        stream.dict.set(PDFName.of('Length'), pdfDoc.context.obj(nb.length));
+        console.log('[ScannedTime] ✓ Đã sửa thành giờ Việt Nam (UTC+7)');
+      } else {
+        console.log('[ScannedTime] Không tìm thấy TJ chứa "Scann" trong stream');
+      }
+    }
+  }
+
   const out = Buffer.from(await pdfDoc.save());
   fs.writeFileSync(outPath, out);
   console.log('Wrote demo PDF:', outPath, 'size', (out.length/1024).toFixed(1), 'KB');

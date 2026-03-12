@@ -132,68 +132,6 @@ export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
       // If Contents is an array, we will iterate and patch every stream that
       // contains /X1 or /X2. This is more robust than only patching the first match.
       const streamsToPatch: Array<{ entryRef: any; entry: PDFRawStream }> = [];
-
-      // Helper to adjust Scanned Time timestamps inside a content stream
-      const scannedTimeRegex = /(\(?Scanned Time:\s*)(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})(\)?)/g;
-      const adjustScannedTimeText = (text: string) => {
-        let replaced = false;
-        const newText = text.replace(scannedTimeRegex, (_m, prefix, Y, Mo, D, hh, mm, ss, suffix) => {
-          const year = parseInt(Y, 10);
-          const month = parseInt(Mo, 10) - 1;
-          const day = parseInt(D, 10);
-          const hour = parseInt(hh, 10);
-          const minute = parseInt(mm, 10);
-          const second = parseInt(ss, 10);
-          const dt = new Date(year, month, day, hour, minute, second);
-          dt.setHours(dt.getHours() - 1);
-          const pad = (n: number) => n.toString().padStart(2, '0');
-          const newDate = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
-          const newTime = `${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`;
-          replaced = true;
-          return `${prefix}${newDate} ${newTime}${suffix || ''}`;
-        });
-        return { newText, replaced };
-      };
-
-      // Apply scanned-time adjustment to every content stream on the first page
-      if (contentsResolved instanceof PDFRawStream) {
-        try {
-          const isCompressed = contentsResolved.dict.get(PDFName.of('Filter'))?.toString() === '/FlateDecode';
-          let bytes = Buffer.from(contentsResolved.contents);
-          if (isCompressed) {
-            try { bytes = await inflate(bytes); } catch {}
-          }
-          const text = bytes.toString('binary');
-          const { newText, replaced } = adjustScannedTimeText(text);
-          if (replaced) {
-            const newBytes = isCompressed ? await deflate(Buffer.from(newText, 'binary')) : Buffer.from(newText, 'binary');
-            (contentsResolved as { contents: Uint8Array }).contents = new Uint8Array(newBytes);
-            contentsResolved.dict.set(PDFName.of('Length'), pdfDoc.context.obj(newBytes.length));
-            logger.log("Adjusted 'Scanned Time' in first-page content stream");
-          }
-        } catch (e) { /* non-fatal */ }
-      } else if (contentsResolved instanceof PDFArray) {
-        for (let i = 0; i < contentsResolved.size(); i++) {
-          try {
-            const ref = contentsResolved.get(i);
-            const entry = pdfDoc.context.lookup(ref);
-            if (!(entry instanceof PDFRawStream)) continue;
-            const isCompressed = entry.dict.get(PDFName.of('Filter'))?.toString() === '/FlateDecode';
-            let bytes = Buffer.from(entry.contents);
-            if (isCompressed) {
-              try { bytes = await inflate(bytes); } catch {}
-            }
-            const text = bytes.toString('binary');
-            const { newText, replaced } = adjustScannedTimeText(text);
-            if (replaced) {
-              const newBytes = isCompressed ? await deflate(Buffer.from(newText, 'binary')) : Buffer.from(newText, 'binary');
-              (entry as { contents: Uint8Array }).contents = new Uint8Array(newBytes);
-              entry.dict.set(PDFName.of('Length'), pdfDoc.context.obj(newBytes.length));
-              logger.log(`Adjusted 'Scanned Time' in content stream #${i}`);
-            }
-          } catch (e) { /* ignore individual failures */ }
-        }
-      }
       if (contentsResolved instanceof PDFRawStream) {
         streamsToPatch.push({ entryRef: contentsVal, entry: contentsResolved });
       } else if (contentsResolved instanceof PDFArray) {
@@ -266,28 +204,6 @@ export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
         }
         let text = bytes.toString('binary');
 
-        // Detect and adjust any "Scanned Time: YYYY-MM-DD HH:MM:SS" timestamps
-        // (source is Taiwan time, UTC+8). Subtract 1 hour to convert to Vietnam
-        // time (UTC+7). If decrement crosses day boundaries, Date handles it.
-        const scannedTimeRegex = /(\(?Scanned Time:\s*)(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})(\)?)/g;
-        let scannedReplaced = false;
-        text = text.replace(scannedTimeRegex, (_m, prefix, Y, Mo, D, hh, mm, ss, suffix) => {
-          const year = parseInt(Y, 10);
-          const month = parseInt(Mo, 10) - 1;
-          const day = parseInt(D, 10);
-          const hour = parseInt(hh, 10);
-          const minute = parseInt(mm, 10);
-          const second = parseInt(ss, 10);
-          const dt = new Date(year, month, day, hour, minute, second);
-          dt.setHours(dt.getHours() - 1);
-          const pad = (n: number) => n.toString().padStart(2, '0');
-          const newDate = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
-          const newTime = `${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`;
-          scannedReplaced = true;
-          return `${prefix}${newDate} ${newTime}${suffix || ''}`;
-        });
-        if (scannedReplaced) logger.log("Adjusted 'Scanned Time' timestamps to Vietnam time (-1h)");
-
         // Aggressively remove any variants that draw /X1 to prevent the original
         // content from re-drawing the background. This pattern covers optional
         // preceding graphics-state calls (`/... gs`) and optional `cm` matrices.
@@ -325,6 +241,81 @@ export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
 
         (entry as { contents: Uint8Array }).contents = new Uint8Array(newBytes);
         entry.dict.set(PDFName.of('Length'), pdfDoc.context.obj(newBytes.length));
+      }
+    }
+
+    // ── Bước 3: Sửa Scanned Time (UTC+8 Đài Loan → UTC+7 Việt Nam) ──────────────
+    // PDF dùng định dạng TJ với kerning: [(Scann)1(e)-1(d)1( Time: 202)1(6-03-)1(11 1)1(6:25:45)] TJ
+    // Cần ghép các phần chuỗi lại, sửa giờ, thay bằng (text) Tj đơn giản.
+    {
+      const allContentsRef = firstPage.node.get(PDFName.of('Contents'));
+      if (allContentsRef) {
+        const allContentsObj = pdfDoc.context.lookup(allContentsRef);
+        const allStreams: PDFRawStream[] = [];
+        if (allContentsObj instanceof PDFRawStream) {
+          allStreams.push(allContentsObj);
+        } else if (allContentsObj instanceof PDFArray) {
+          for (let i = 0; i < allContentsObj.size(); i++) {
+            const e = pdfDoc.context.lookup(allContentsObj.get(i));
+            if (e instanceof PDFRawStream) allStreams.push(e);
+          }
+        }
+        logger.log(`[ScannedTime] Kiểm tra ${allStreams.length} content stream trên trang 1`);
+
+        for (const stream of allStreams) {
+          const isZ = stream.dict.get(PDFName.of('Filter'))?.toString() === '/FlateDecode';
+          let bytes = Buffer.from(stream.contents);
+          if (isZ) { try { bytes = await inflate(bytes); } catch { continue; } }
+          let text = bytes.toString('binary');
+
+          if (!text.includes('Scann')) continue;
+
+          // Match TJ array chứa "Scann" (phần đầu của "Scanned Time:")
+          // Format: [(Scann)kern(e)kern(d)kern( Time: ...)...] TJ
+          const tjRegex = /\[([^[\]]*Scann[^[\]]*)]\s*TJ/g;
+          const fixed = text.replace(tjRegex, (fullMatch: string, tjContent: string) => {
+            // Ghép tất cả các phần chuỗi trong TJ array
+            const parts: string[] = [];
+            const partRe = /\(([^)]*)\)/g;
+            let pm: RegExpExecArray | null;
+            while ((pm = partRe.exec(tjContent)) !== null) parts.push(pm[1]);
+            const fullText = parts.join('');
+            logger.log(`[ScannedTime] TJ text được ghép: ${JSON.stringify(fullText)}`);
+
+            // Tìm datetime trong chuỗi ghép
+            const dtM = /(\d{4}-\d{2}-\d{2}) (\d{2}):(\d{2}):(\d{2})/.exec(fullText);
+            if (!dtM) {
+              logger.warn(`[ScannedTime] TJ chứa Scann nhưng không tìm thấy datetime: ${JSON.stringify(fullText)}`);
+              return fullMatch;
+            }
+
+            let hour = parseInt(dtM[2], 10) - 1;
+            let dateStr = dtM[1];
+            if (hour < 0) {
+              hour = 23;
+              const d = new Date(dateStr + 'T00:00:00Z');
+              d.setUTCDate(d.getUTCDate() - 1);
+              dateStr = d.toISOString().slice(0, 10);
+            }
+            const newFullText = fullText.replace(
+              dtM[0],
+              `${dateStr} ${String(hour).padStart(2, '0')}:${dtM[3]}:${dtM[4]}`,
+            );
+            logger.log(`[ScannedTime] Sửa: "${dtM[0]}" → "${dateStr} ${String(hour).padStart(2, '0')}:${dtM[3]}:${dtM[4]}" (UTC+8 → UTC+7)`);
+            return `(${newFullText}) Tj`;
+          });
+
+          if (fixed !== text) {
+            const newBytes = isZ
+              ? await deflate(Buffer.from(fixed, 'binary'))
+              : Buffer.from(fixed, 'binary');
+            (stream as { contents: Uint8Array }).contents = new Uint8Array(newBytes);
+            stream.dict.set(PDFName.of('Length'), pdfDoc.context.obj(newBytes.length));
+            logger.log('[ScannedTime] ✓ Đã sửa thành giờ Việt Nam (UTC+7)');
+          } else {
+            logger.warn('[ScannedTime] Không tìm thấy TJ chứa Scann trong stream');
+          }
+        }
       }
     }
 
