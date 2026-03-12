@@ -52,6 +52,23 @@ export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
     const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
     const newLogo = await pdfDoc.embedPng(logoPngBuffer);
 
+    // Nếu có file background.png trong public, nhúng và thay XObject /X1
+    try {
+      const bgPath = path.join(process.cwd(), 'public', 'background.png');
+      if (fs.existsSync(bgPath)) {
+        const bgBuf = fs.readFileSync(bgPath);
+        const newBg = await pdfDoc.embedPng(bgBuf);
+        logger.log('Found public/background.png — replacing X1 if present');
+        // We'll set /X1 to the new background image if X1 exists in the page resources
+        // (if X1 is not present, we still embed the image but do not force-add it)
+        // Replacement happens below after we resolve xObjectDict.
+        // Store ref on a temporary variable to use later.
+        (pdfDoc as any).__newBackgroundRef = newBg.ref;
+      }
+    } catch (e) {
+      logger.warn('Error while embedding background.png — skipping background replacement');
+    }
+
     const pages = pdfDoc.getPages();
     if (pages.length === 0) {
       logger.warn('PDF has no pages – skipping logo replacement');
@@ -71,11 +88,24 @@ export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
       return pdfBuffer;
     }
     const xObjectDict = pdfDoc.context.lookup(xObjValue, PDFDict);
-    if (!xObjectDict || !xObjectDict.has(PDFName.of('X2'))) {
-      logger.warn('XObject /X2 not found on first page – skipping');
+    if (!xObjectDict) {
+      logger.warn('XObject dictionary not found on first page – skipping');
       return pdfBuffer;
     }
-    xObjectDict.set(PDFName.of('X2'), newLogo.ref);
+
+    // Replace background XObject /X1 if we embedded a new background earlier
+    const newBgRef = (pdfDoc as any).__newBackgroundRef;
+    if (newBgRef && xObjectDict.has(PDFName.of('X1'))) {
+      xObjectDict.set(PDFName.of('X1'), newBgRef);
+      logger.log('Replaced XObject /X1 with public/background.png');
+    }
+
+    // Replace /X2 (logo) if present
+    if (!xObjectDict.has(PDFName.of('X2'))) {
+      logger.warn('XObject /X2 not found on first page – skipping logo replacement');
+    } else {
+      xObjectDict.set(PDFName.of('X2'), newLogo.ref);
+    }
 
     // ── Bước 2: Sửa ma trận cm trong content stream để giữ tỉ lệ ──────────────
     // Chiều rộng hiển thị giữ nguyên; chiều cao tính lại từ tỉ lệ logo.png
