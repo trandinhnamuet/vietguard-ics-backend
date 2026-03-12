@@ -132,6 +132,68 @@ export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
       // If Contents is an array, we will iterate and patch every stream that
       // contains /X1 or /X2. This is more robust than only patching the first match.
       const streamsToPatch: Array<{ entryRef: any; entry: PDFRawStream }> = [];
+
+      // Helper to adjust Scanned Time timestamps inside a content stream
+      const scannedTimeRegex = /(\(?Scanned Time:\s*)(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})(\)?)/g;
+      const adjustScannedTimeText = (text: string) => {
+        let replaced = false;
+        const newText = text.replace(scannedTimeRegex, (_m, prefix, Y, Mo, D, hh, mm, ss, suffix) => {
+          const year = parseInt(Y, 10);
+          const month = parseInt(Mo, 10) - 1;
+          const day = parseInt(D, 10);
+          const hour = parseInt(hh, 10);
+          const minute = parseInt(mm, 10);
+          const second = parseInt(ss, 10);
+          const dt = new Date(year, month, day, hour, minute, second);
+          dt.setHours(dt.getHours() - 1);
+          const pad = (n: number) => n.toString().padStart(2, '0');
+          const newDate = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+          const newTime = `${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`;
+          replaced = true;
+          return `${prefix}${newDate} ${newTime}${suffix || ''}`;
+        });
+        return { newText, replaced };
+      };
+
+      // Apply scanned-time adjustment to every content stream on the first page
+      if (contentsResolved instanceof PDFRawStream) {
+        try {
+          const isCompressed = contentsResolved.dict.get(PDFName.of('Filter'))?.toString() === '/FlateDecode';
+          let bytes = Buffer.from(contentsResolved.contents);
+          if (isCompressed) {
+            try { bytes = await inflate(bytes); } catch {}
+          }
+          const text = bytes.toString('binary');
+          const { newText, replaced } = adjustScannedTimeText(text);
+          if (replaced) {
+            const newBytes = isCompressed ? await deflate(Buffer.from(newText, 'binary')) : Buffer.from(newText, 'binary');
+            (contentsResolved as { contents: Uint8Array }).contents = new Uint8Array(newBytes);
+            contentsResolved.dict.set(PDFName.of('Length'), pdfDoc.context.obj(newBytes.length));
+            logger.log("Adjusted 'Scanned Time' in first-page content stream");
+          }
+        } catch (e) { /* non-fatal */ }
+      } else if (contentsResolved instanceof PDFArray) {
+        for (let i = 0; i < contentsResolved.size(); i++) {
+          try {
+            const ref = contentsResolved.get(i);
+            const entry = pdfDoc.context.lookup(ref);
+            if (!(entry instanceof PDFRawStream)) continue;
+            const isCompressed = entry.dict.get(PDFName.of('Filter'))?.toString() === '/FlateDecode';
+            let bytes = Buffer.from(entry.contents);
+            if (isCompressed) {
+              try { bytes = await inflate(bytes); } catch {}
+            }
+            const text = bytes.toString('binary');
+            const { newText, replaced } = adjustScannedTimeText(text);
+            if (replaced) {
+              const newBytes = isCompressed ? await deflate(Buffer.from(newText, 'binary')) : Buffer.from(newText, 'binary');
+              (entry as { contents: Uint8Array }).contents = new Uint8Array(newBytes);
+              entry.dict.set(PDFName.of('Length'), pdfDoc.context.obj(newBytes.length));
+              logger.log(`Adjusted 'Scanned Time' in content stream #${i}`);
+            }
+          } catch (e) { /* ignore individual failures */ }
+        }
+      }
       if (contentsResolved instanceof PDFRawStream) {
         streamsToPatch.push({ entryRef: contentsVal, entry: contentsResolved });
       } else if (contentsResolved instanceof PDFArray) {
