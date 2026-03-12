@@ -10,221 +10,244 @@ const deflate = promisify(zlib.deflate);
 
 const logger = new Logger('PdfLogoReplacer');
 
-/**
- * Đọc chiều rộng & chiều cao (pixel) từ header của file PNG.
- * Theo chuẩn PNG: 8 byte signature, tiếp theo là chunk IHDR chứa
- *   width  (4 byte big-endian) tại offset 16
- *   height (4 byte big-endian) tại offset 20
- */
+/** Đọc kích thước pixel từ PNG header (offset 16–20) */
 function getPngDimensions(buf: Buffer): { width: number; height: number } {
-  return {
-    width: buf.readUInt32BE(16),
-    height: buf.readUInt32BE(20),
-  };
+  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
 }
 
 /**
- * Thay thế logo VNeID (XObject /X2 trên trang đầu) bằng logo của chúng ta.
- *
- * Chiều RỘNG hiển thị giữ nguyên bằng logo cũ (~141.73 pt).
- * Chiều CAO được tính lại để giữ đúng tỉ lệ chiều rộng/chiều cao của logo.png,
- * tránh méo hình.
- *
- * Cơ chế: PDF content stream chứa lệnh `cm` (concat matrix) dạng:
- *   141.73228455 0 0 -24.94488144 0 24.94488144 cm /X2 Do
- * Hàm này giải nén stream, thay giá trị height (-24.94 / 24.94) bằng giá trị
- * mới tính từ tỉ lệ ảnh, rồi nén lại.
- *
- * Trả về buffer gốc nếu có lỗi để đảm bảo báo cáo không bao giờ bị mất.
+ * Xử lý PDF nhận từ external API trước khi gửi cho người dùng:
+ *  - Thay hình nền trang 1 (/X1) bằng public/background.png, giữ tỉ lệ gốc,
+ *    và làm mờ 50% bằng cách chèn ExtGState (ca=0.5).
+ *  - Thay logo trang 1 (/X2) bằng public/logo.png, giữ tỉ lệ gốc, căn vị trí.
+ * Trả về buffer gốc nếu có bất kỳ lỗi nào để báo cáo không bao giờ bị mất.
  */
 export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
   try {
+    // ── Đọc ảnh từ disk ──────────────────────────────────────────────────────
     const logoPath = path.join(process.cwd(), 'public', 'logo.png');
     if (!fs.existsSync(logoPath)) {
-      logger.warn('logo.png not found at public/logo.png – skipping logo replacement');
+      logger.warn('logo.png not found – skipping');
       return pdfBuffer;
     }
+    const logoBuffer = fs.readFileSync(logoPath);
+    const { width: logoW, height: logoH } = getPngDimensions(logoBuffer);
+    logger.log(`Logo: ${logoW}×${logoH} px`);
 
-    const logoPngBuffer = fs.readFileSync(logoPath);
-    const { width: logoW, height: logoH } = getPngDimensions(logoPngBuffer);
-    logger.log(`Logo PNG dimensions: ${logoW}×${logoH} px`);
-
-    const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
-    const newLogo = await pdfDoc.embedPng(logoPngBuffer);
-
-    // Nếu có file background.png trong public, nhúng và thay XObject /X1
-    try {
-      const bgPath = path.join(process.cwd(), 'public', 'background.png');
-      if (fs.existsSync(bgPath)) {
-        const bgBuf = fs.readFileSync(bgPath);
-        const newBg = await pdfDoc.embedPng(bgBuf);
-        logger.log('Found public/background.png — replacing X1 if present');
-        // We'll set /X1 to the new background image if X1 exists in the page resources
-        // (if X1 is not present, we still embed the image but do not force-add it)
-        // Replacement happens below after we resolve xObjectDict.
-        // Store ref on a temporary variable to use later.
-        (pdfDoc as any).__newBackgroundRef = newBg.ref;
-      }
-    } catch (e) {
-      logger.warn('Error while embedding background.png — skipping background replacement');
+    const bgPath = path.join(process.cwd(), 'public', 'background.png');
+    const hasBg = fs.existsSync(bgPath);
+    let bgBuffer: Buffer | null = null;
+    let bgW = 0, bgH = 0;
+    if (hasBg) {
+      bgBuffer = fs.readFileSync(bgPath);
+      ({ width: bgW, height: bgH } = getPngDimensions(bgBuffer));
+      logger.log(`Background: ${bgW}×${bgH} px`);
     }
+
+    // ── Load PDF + nhúng ảnh ─────────────────────────────────────────────────
+    const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+    const newLogo = await pdfDoc.embedPng(logoBuffer);
+    const newBg   = hasBg ? await pdfDoc.embedPng(bgBuffer!) : null;
 
     const pages = pdfDoc.getPages();
-    if (pages.length === 0) {
-      logger.warn('PDF has no pages – skipping logo replacement');
-      return pdfBuffer;
-    }
+    if (pages.length === 0) return pdfBuffer;
     const firstPage = pages[0];
 
-    // ── Bước 1: Thay /X2 trong Resources của trang 1 ─────────────────────────
+    // ── Bước 1: Thay XObject trong Resources ────────────────────────────────
     const resources = firstPage.node.Resources();
-    if (!resources) {
-      logger.warn('First page has no Resources dictionary – skipping');
-      return pdfBuffer;
-    }
+    if (!resources) return pdfBuffer;
+
     const xObjValue = resources.get(PDFName.of('XObject'));
-    if (!xObjValue) {
-      logger.warn('No XObject dictionary on first page – skipping');
-      return pdfBuffer;
-    }
+    if (!xObjValue) return pdfBuffer;
     const xObjectDict = pdfDoc.context.lookup(xObjValue, PDFDict);
-    if (!xObjectDict) {
-      logger.warn('XObject dictionary not found on first page – skipping');
-      return pdfBuffer;
+    if (!xObjectDict) return pdfBuffer;
+
+    // Thay /X1 (hình nền)
+    if (newBg && xObjectDict.has(PDFName.of('X1'))) {
+      // Preserve original X1 under a new name so content's /X1 Do can be
+      // made effectively a no-op by assigning an empty Form to /X1.
+      const origRef = xObjectDict.get(PDFName.of('X1'));
+      if (origRef) {
+        xObjectDict.set(PDFName.of('X1_OLD'), origRef);
+      }
+
+      // Create an empty Form XObject for /X1 so existing /X1 Do does nothing.
+      try {
+        const emptyBytes = await deflate(Buffer.from('q Q', 'binary'));
+        const emptyStream = pdfDoc.context.flateStream(new Uint8Array(emptyBytes), {
+          Type: 'XObject', Subtype: 'Form', BBox: pdfDoc.context.obj([0, 0, 1, 1]), FormType: 1,
+        });
+        const emptyRef = pdfDoc.context.register(emptyStream);
+        xObjectDict.set(PDFName.of('X1'), emptyRef);
+      } catch (e) {
+        // If creating empty Form fails, fall back to removing X1 reference
+        xObjectDict.delete(PDFName.of('X1'));
+      }
+
+      // Put the real background under a new name /XBG and draw that from pre-stream
+      xObjectDict.set(PDFName.of('XBG'), newBg.ref);
+      logger.log('Assigned background.png to /XBG and neutralized /X1 (saved original as /X1_OLD)');
+
+      // Thêm ExtGState cho 50% opacity vào Resources của trang
+      // PDF dùng /ca (fill alpha) cho ảnh raster
+      const extGSKey = PDFName.of('ExtGState');
+      let extGSDict: PDFDict;
+      const existingEGS = resources.get(extGSKey);
+      if (existingEGS) {
+        extGSDict = pdfDoc.context.lookup(existingEGS) as PDFDict;
+      } else {
+        extGSDict = pdfDoc.context.obj({}) as PDFDict;
+        resources.set(extGSKey, extGSDict);
+      }
+      // /GS_BG50: graphics state với fill và stroke alpha = 0.5
+      extGSDict.set(
+        PDFName.of('GS_BG50'),
+        pdfDoc.context.obj({ Type: 'ExtGState', ca: 0.5, CA: 0.5 }),
+      );
+      logger.log('Added /GS_BG50 ExtGState (50% opacity)');
     }
 
-    // Replace background XObject /X1 if we embedded a new background earlier
-    const newBgRef = (pdfDoc as any).__newBackgroundRef;
-    if (newBgRef && xObjectDict.has(PDFName.of('X1'))) {
-      xObjectDict.set(PDFName.of('X1'), newBgRef);
-      logger.log('Replaced XObject /X1 with public/background.png');
-    }
-
-    // Replace /X2 (logo) if present
-    if (!xObjectDict.has(PDFName.of('X2'))) {
-      logger.warn('XObject /X2 not found on first page – skipping logo replacement');
-    } else {
+    // Thay /X2 (logo)
+    if (xObjectDict.has(PDFName.of('X2'))) {
       xObjectDict.set(PDFName.of('X2'), newLogo.ref);
+      logger.log('Replaced /X2 with logo.png');
     }
 
-    // ── Bước 2: Sửa ma trận cm trong content stream để giữ tỉ lệ ──────────────
-    // Chiều rộng hiển thị giữ nguyên; chiều cao tính lại từ tỉ lệ logo.png
-    const displayWidth  = 141.73228455;           // pt – giữ nguyên
-    const origHeight    = 24.94488144;            // pt – chiều cao logo cũ
-    const displayHeight = displayWidth * logoH / logoW; // pt – chiều cao mới
-    logger.log(
-      `Display size: ${displayWidth.toFixed(2)}×${displayHeight.toFixed(2)} pt` +
-      ` (was ×${origHeight.toFixed(2)} pt)`,
-    );
+    // ── Bước 2: Patch content stream ────────────────────────────────────────
+    // Chiều rộng logo giữ nguyên (141.73 pt), chiều cao tính lại theo tỉ lệ
+    const logoDisplayW = 141.73228455;
+    const logoDisplayH = logoDisplayW * logoH / logoW;
 
-    // Tìm content stream chứa lệnh /X1 Do (background) và /X2 Do (logo)
+    // Hình nền: giữ nguyên chiều rộng trang (593.84 pt), chiều cao tính lại
+    const bgPageW      = 593.84259033;
+    const bgDisplayH   = hasBg ? bgPageW * bgH / bgW : 840;
+    if (hasBg) {
+      logger.log(`Background display: ${bgPageW.toFixed(2)}×${bgDisplayH.toFixed(2)} pt (was ×840 pt)`);
+    }
+
     const contentsVal = firstPage.node.get(PDFName.of('Contents'));
     if (contentsVal) {
       const contentsResolved = pdfDoc.context.lookup(contentsVal);
 
-      // Content có thể là stream đơn hoặc mảng các stream
-      let rawStream: PDFRawStream | null = null;
-
+      // If Contents is an array, we will iterate and patch every stream that
+      // contains /X1 or /X2. This is more robust than only patching the first match.
+      const streamsToPatch: Array<{ entryRef: any; entry: PDFRawStream }> = [];
       if (contentsResolved instanceof PDFRawStream) {
-        rawStream = contentsResolved;
+        streamsToPatch.push({ entryRef: contentsVal, entry: contentsResolved });
       } else if (contentsResolved instanceof PDFArray) {
         for (let i = 0; i < contentsResolved.size(); i++) {
-          const entry = pdfDoc.context.lookup(contentsResolved.get(i));
+          const ref = contentsResolved.get(i);
+          const entry = pdfDoc.context.lookup(ref);
           if (!(entry instanceof PDFRawStream)) continue;
-
-          // Kiểm tra stream này có chứa /X2 Do hoặc /X1 Do không
           const filter = entry.dict.get(PDFName.of('Filter'));
           let bytes = Buffer.from(entry.contents);
           if (filter?.toString() === '/FlateDecode') {
-            try { bytes = await inflate(bytes); } catch { /* thử stream tiếp */ }
+            try { bytes = await inflate(bytes); } catch { /* skip invalid */ }
           }
-          const s = bytes.toString('binary');
-          if (s.includes('/X2 Do') || s.includes('/X1 Do')) {
-            rawStream = entry;
-            break;
+          const text = bytes.toString('binary');
+          if (text.includes('/X1 Do') || text.includes('/X2 Do')) {
+            streamsToPatch.push({ entryRef: ref, entry });
           }
         }
       }
 
-      if (rawStream) {
-        const filterVal = rawStream.dict.get(PDFName.of('Filter'));
-        const isCompressed = filterVal?.toString() === '/FlateDecode';
-        let bytes = Buffer.from(rawStream.contents);
-        if (isCompressed) bytes = await inflate(bytes);
+      // Insert a new content stream *before* existing contents to draw
+      // the background with a reset transform so it's anchored to page bottom.
+      if (newBg) {
+        try {
+          const pageWidth = firstPage.getWidth();
+          const bgDisplayHActual = pageWidth * bgH / bgW;
+          const verticalShift = 0; // raise background by 150pt (negative moves down)
+          // Scale background to page height so bottom aligns with page bottom
+          const pageHeight = firstPage.getHeight();
+          const bgDisplayHFull = pageHeight;
+          const displayW = bgDisplayHFull * bgW / bgH;
+          const ty = verticalShift; // place image bottom at verticalShift (negative moves down)
+          const preContent = `q\n1 0 0 1 0 0 cm\n/GS_BG50 gs ${displayW} 0 0 ${bgDisplayHFull} 0 ${ty} cm /XBG Do\nQ\n`;
+          const preStream = pdfDoc.context.flateStream(Buffer.from(preContent, 'binary'));
+          const preRef = pdfDoc.context.register(preStream);
 
+          // Replace Contents: if single stream -> make array [pre, old]
+          const contentsVal = firstPage.node.get(PDFName.of('Contents'));
+          if (contentsVal) {
+            const contentsResolved = pdfDoc.context.lookup(contentsVal);
+            if (contentsResolved instanceof PDFRawStream) {
+              const arr = pdfDoc.context.obj([preRef, contentsVal]);
+              firstPage.node.set(PDFName.of('Contents'), arr);
+            } else if (contentsResolved instanceof PDFArray) {
+              // Build new array with preRef followed by existing refs
+              const items: any[] = [preRef];
+              for (let i = 0; i < contentsResolved.size(); i++) {
+                items.push(contentsResolved.get(i));
+              }
+              const newArr = pdfDoc.context.obj(items);
+              firstPage.node.set(PDFName.of('Contents'), newArr);
+            }
+            logger.log('Inserted pre-content stream to anchor background at bottom');
+          }
+        } catch (e) {
+          logger.warn('Failed to insert pre-content stream:', (e as Error).message);
+        }
+      }
+
+      if (streamsToPatch.length === 0) {
+        logger.warn('No content streams found that reference /X1 or /X2');
+      }
+
+      // Process every matched stream and apply neutralization and X2 patching
+      for (const item of streamsToPatch) {
+        const entry = item.entry;
+        const isCompressed = entry.dict.get(PDFName.of('Filter'))?.toString() === '/FlateDecode';
+        let bytes = Buffer.from(entry.contents);
+        if (isCompressed) {
+          try { bytes = await inflate(bytes); } catch { /* continue with raw bytes */ }
+        }
         let text = bytes.toString('binary');
 
-        // 1) X1 — background: nếu có background nhúng, giữ chiều rộng A, tính chiều cao theo tỷ lệ
-        const newBgRef = (pdfDoc as any).__newBackgroundRef;
-        const newBgDims = (pdfDoc as any).__newBackgroundDims;
-        if (newBgRef && newBgDims && /\/X1\s+Do/.test(text)) {
-          // Bắt dạng: A 0 0 D e f cm /X1 Do
-          const reX1 = /([0-9\.]+)\s+0\s+0\s+(-?[0-9\.]+)\s+(-?[0-9\.]+)\s+(-?[0-9\.]+)\s+cm\s+\/X1\s+Do/;
-          const m = text.match(reX1);
-          if (m) {
-            const A = parseFloat(m[1]);
-            const origE = parseFloat(m[3]);
-            // compute new display height preserving aspect ratio
-            const newDisplayH = A * (newBgDims.h / newBgDims.w);
-            const newD = -Math.abs(newDisplayH);
-            const newF = newDisplayH; // keep top alignment similar to original
-
-            // Ensure ExtGState /GS_BG exists with 50% opacity
-            let extGS = resources.get(PDFName.of('ExtGState'));
-            let extGSDict: PDFDict;
-            if (extGS) {
-              extGSDict = pdfDoc.context.lookup(extGS, PDFDict);
-            } else {
-              extGSDict = pdfDoc.context.obj({});
-              resources.set(PDFName.of('ExtGState'), extGSDict);
-            }
-            // Add GS_BG entry
-            extGSDict.set(PDFName.of('GS_BG'), pdfDoc.context.obj({ Type: PDFName.of('ExtGState'), CA: 0.5, ca: 0.5 }));
-
-            const replacement = `${A} 0 0 ${newD} ${origE} ${newF} cm /GS_BG gs /X1 Do`;
-            text = text.replace(reX1, replacement);
-            logger.log('Patched /X1 matrix and inserted /GS_BG gs (50% opacity)');
-          } else {
-            logger.warn('/X1 Do found but matrix pattern not matched — background may not preserve aspect ratio');
-          }
+        // Aggressively remove any variants that draw /X1 to prevent the original
+        // content from re-drawing the background. This pattern covers optional
+        // preceding graphics-state calls (`/... gs`) and optional `cm` matrices.
+        const aggressiveX1Regex = /(?:\/\w+\s+gs\s*)?(?:[-0-9\.\s]+cm\s*)?\/X1\s+Do/gi;
+        if (aggressiveX1Regex.test(text)) {
+          text = text.replace(aggressiveX1Regex, '');
+          logger.log('Aggressively removed /X1 draw variants from stream');
+        }
+        // Also remove any isolated GS references for our background if present
+        const gsBgRegex = /\/GS_BG50\s+gs/gi;
+        if (gsBgRegex.test(text)) {
+          text = text.replace(gsBgRegex, '');
+          logger.log('Removed inline /GS_BG50 gs from stream');
         }
 
-        // 2) X2 — logo: existing logic (keep modified matrix and position)
-        // Tìm và thay ma trận cm của /X2
-        // Dạng: 141.73228455 0 0 -24.94488144 0 24.94488144 cm /X2 Do
-        const cmRegex = /141\.73228455\s+0\s+0\s+-24\.94488144\s+0\s+24\.94488144\s+cm\s+\/X2\s+Do/;
-
-        if (cmRegex.test(text)) {
+        // Patch /X2: adjust height and keep offsets
+        const x2Regex = /141\.73228455\s+0\s+0\s+-24\.94488144\s+0\s+24\.94488144\s+cm\s+\/X2\s+Do/;
+        if (x2Regex.test(text)) {
+          // Move logo left by 30pt and up by 70pt relative to previous offsets
+          const logoOffsetX = -10 - 30; // -40
+          // Move logo up 70pt relative to baseline offset
+          const logoOffsetY = logoDisplayH - 20 - 70; // move up 70pt
           text = text.replace(
-            cmRegex,
-            `141.73228455 0 0 -${displayHeight} -50 ${displayHeight - 70} cm /X2 Do`,
+            x2Regex,
+            `${logoDisplayW} 0 0 -${logoDisplayH} ${logoOffsetX} ${logoOffsetY} cm /X2 Do`,
           );
-          logger.log('Content stream cm matrix patched for /X2 (aspect ratio preserved)');
+          logger.log('Patched /X2 cm matrix (position adjusted)');
         } else {
-          logger.warn(
-            'cm matrix pattern for /X2 not found in content stream – ' +
-            'logo image may still appear stretched',
-          );
+          logger.warn('/X2 cm pattern not found in content stream');
         }
 
         const newBytes = isCompressed
           ? await deflate(Buffer.from(text, 'binary'))
           : Buffer.from(text, 'binary');
 
-        // contents là readonly về kiểu nhưng có thể ghi ở runtime
-        (rawStream as { contents: Uint8Array }).contents = new Uint8Array(newBytes);
-        // Cập nhật Length (thay ref gián tiếp bằng integer trực tiếp)
-        rawStream.dict.set(PDFName.of('Length'), pdfDoc.context.obj(newBytes.length));
-      } else {
-        logger.warn('Could not locate page 1 content stream – logo may appear stretched');
+        (entry as { contents: Uint8Array }).contents = new Uint8Array(newBytes);
+        entry.dict.set(PDFName.of('Length'), pdfDoc.context.obj(newBytes.length));
       }
     }
 
-    logger.log('PDF logo replacement complete');
-    const result = await pdfDoc.save();
-    return Buffer.from(result);
+    logger.log('PDF processing complete');
+    return Buffer.from(await pdfDoc.save());
   } catch (err: any) {
-    logger.error('Failed to replace logo in PDF, returning original:', err?.message);
+    logger.error('Failed to process PDF, returning original:', err?.message);
     return pdfBuffer;
   }
 }
