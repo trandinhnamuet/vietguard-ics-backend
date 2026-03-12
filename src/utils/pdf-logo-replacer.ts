@@ -117,7 +117,7 @@ export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
       ` (was ×${origHeight.toFixed(2)} pt)`,
     );
 
-    // Tìm content stream chứa lệnh /X2 Do
+    // Tìm content stream chứa lệnh /X1 Do (background) và /X2 Do (logo)
     const contentsVal = firstPage.node.get(PDFName.of('Contents'));
     if (contentsVal) {
       const contentsResolved = pdfDoc.context.lookup(contentsVal);
@@ -132,13 +132,14 @@ export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
           const entry = pdfDoc.context.lookup(contentsResolved.get(i));
           if (!(entry instanceof PDFRawStream)) continue;
 
-          // Kiểm tra stream này có chứa /X2 Do không
+          // Kiểm tra stream này có chứa /X2 Do hoặc /X1 Do không
           const filter = entry.dict.get(PDFName.of('Filter'));
           let bytes = Buffer.from(entry.contents);
           if (filter?.toString() === '/FlateDecode') {
             try { bytes = await inflate(bytes); } catch { /* thử stream tiếp */ }
           }
-          if (bytes.toString('binary').includes('/X2 Do')) {
+          const s = bytes.toString('binary');
+          if (s.includes('/X2 Do') || s.includes('/X1 Do')) {
             rawStream = entry;
             break;
           }
@@ -153,10 +154,45 @@ export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
 
         let text = bytes.toString('binary');
 
+        // 1) X1 — background: nếu có background nhúng, giữ chiều rộng A, tính chiều cao theo tỷ lệ
+        const newBgRef = (pdfDoc as any).__newBackgroundRef;
+        const newBgDims = (pdfDoc as any).__newBackgroundDims;
+        if (newBgRef && newBgDims && /\/X1\s+Do/.test(text)) {
+          // Bắt dạng: A 0 0 D e f cm /X1 Do
+          const reX1 = /([0-9\.]+)\s+0\s+0\s+(-?[0-9\.]+)\s+(-?[0-9\.]+)\s+(-?[0-9\.]+)\s+cm\s+\/X1\s+Do/;
+          const m = text.match(reX1);
+          if (m) {
+            const A = parseFloat(m[1]);
+            const origE = parseFloat(m[3]);
+            // compute new display height preserving aspect ratio
+            const newDisplayH = A * (newBgDims.h / newBgDims.w);
+            const newD = -Math.abs(newDisplayH);
+            const newF = newDisplayH; // keep top alignment similar to original
+
+            // Ensure ExtGState /GS_BG exists with 50% opacity
+            let extGS = resources.get(PDFName.of('ExtGState'));
+            let extGSDict: PDFDict;
+            if (extGS) {
+              extGSDict = pdfDoc.context.lookup(extGS, PDFDict);
+            } else {
+              extGSDict = pdfDoc.context.obj({});
+              resources.set(PDFName.of('ExtGState'), extGSDict);
+            }
+            // Add GS_BG entry
+            extGSDict.set(PDFName.of('GS_BG'), pdfDoc.context.obj({ Type: PDFName.of('ExtGState'), CA: 0.5, ca: 0.5 }));
+
+            const replacement = `${A} 0 0 ${newD} ${origE} ${newF} cm /GS_BG gs /X1 Do`;
+            text = text.replace(reX1, replacement);
+            logger.log('Patched /X1 matrix and inserted /GS_BG gs (50% opacity)');
+          } else {
+            logger.warn('/X1 Do found but matrix pattern not matched — background may not preserve aspect ratio');
+          }
+        }
+
+        // 2) X2 — logo: existing logic (keep modified matrix and position)
         // Tìm và thay ma trận cm của /X2
         // Dạng: 141.73228455 0 0 -24.94488144 0 24.94488144 cm /X2 Do
-        const cmRegex =
-          /141\.73228455\s+0\s+0\s+-24\.94488144\s+0\s+24\.94488144\s+cm\s+\/X2\s+Do/;
+        const cmRegex = /141\.73228455\s+0\s+0\s+-24\.94488144\s+0\s+24\.94488144\s+cm\s+\/X2\s+Do/;
 
         if (cmRegex.test(text)) {
           text = text.replace(
