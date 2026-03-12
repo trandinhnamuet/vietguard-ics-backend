@@ -131,7 +131,7 @@ export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
         if (cmRegex.test(text)) {
           text = text.replace(
             cmRegex,
-            `141.73228455 0 0 -${displayHeight} -10 ${displayHeight - 20} cm /X2 Do`,
+            `141.73228455 0 0 -${displayHeight} -50 ${displayHeight - 70} cm /X2 Do`,
           );
           logger.log('Content stream cm matrix patched for /X2 (aspect ratio preserved)');
         } else {
