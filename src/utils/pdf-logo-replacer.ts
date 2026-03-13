@@ -10,8 +10,8 @@ const deflate = promisify(zlib.deflate);
 
 const logger = new Logger('PdfLogoReplacer');
 
-/** Tạm thời tắt thay hình nền trang đầu — đổi thành true để bật lại */
-const REPLACE_BACKGROUND = false;
+/** Tắt/bật thay hình nền trang đầu */
+const REPLACE_BACKGROUND = true;
 
 /** Đọc kích thước pixel từ PNG header (offset 16–20) */
 function getPngDimensions(buf: Buffer): { width: number; height: number } {

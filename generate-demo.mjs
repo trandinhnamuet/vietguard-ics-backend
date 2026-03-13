@@ -7,8 +7,8 @@ const deflate = promisify(zlib.deflate);
 
 function getPng(buf) { return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) }; }
 
-/** Tạm thời tắt thay hình nền trang đầu — đổi thành true để bật lại */
-const REPLACE_BACKGROUND = false;
+/** Tắt/bật thay hình nền trang đầu */
+const REPLACE_BACKGROUND = true;
 
 async function run() {
   const inPath = 'vneid-before.pdf';
@@ -32,16 +32,28 @@ async function run() {
     console.log('Embedded logo:', logoW, 'x', logoH);
   } else console.log('No logo found at', logoPath);
 
-  // Embed background if exists
-  const bgPath = 'public/background.png';
+  // Embed background if exists (accept PNG or JPG)
+  const bgCandidates = ['public/background.png', 'public/background.jpg', 'public/background.jpeg'];
+  let bgFile = null;
+  for (const p of bgCandidates) {
+    if (REPLACE_BACKGROUND && fs.existsSync(p)) { bgFile = p; break; }
+  }
   let newBg = null;
   let bgW = 0, bgH = 0;
-  if (REPLACE_BACKGROUND && fs.existsSync(bgPath)) {
-    const bgBuf = fs.readFileSync(bgPath);
-    ({ w: bgW, h: bgH } = getPng(bgBuf));
-    newBg = await pdfDoc.embedPng(bgBuf);
-    console.log('Embedded background:', bgW, 'x', bgH);
-  } else console.log('No background found at', bgPath);
+  if (bgFile) {
+    const bgBuf = fs.readFileSync(bgFile);
+    if (bgFile.toLowerCase().endsWith('.jpg') || bgFile.toLowerCase().endsWith('.jpeg')) {
+      newBg = await pdfDoc.embedJpg(bgBuf);
+      bgW = newBg.width; bgH = newBg.height;
+      console.log('Embedded background (jpg):', bgW, 'x', bgH, 'from', bgFile);
+    } else {
+      newBg = await pdfDoc.embedPng(bgBuf);
+      bgW = newBg.width; bgH = newBg.height;
+      console.log('Embedded background (png):', bgW, 'x', bgH, 'from', bgFile);
+    }
+  } else {
+    console.log('No background found at public/background.{png,jpg,jpeg}');
+  }
 
   const firstPage = pdfDoc.getPages()[0];
   const resources = firstPage.node.Resources();
