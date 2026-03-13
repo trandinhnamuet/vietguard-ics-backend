@@ -102,12 +102,12 @@ export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
         extGSDict = pdfDoc.context.obj({}) as PDFDict;
         resources.set(extGSKey, extGSDict);
       }
-      // /GS_BG50: graphics state với fill và stroke alpha = 0.5
+      // /GS_BG50: graphics state với fill và stroke alpha = 0.2 (20% opacity)
       extGSDict.set(
         PDFName.of('GS_BG50'),
-        pdfDoc.context.obj({ Type: 'ExtGState', ca: 0.5, CA: 0.5 }),
+        pdfDoc.context.obj({ Type: 'ExtGState', ca: 0.2, CA: 0.2 }),
       );
-      logger.log('Added /GS_BG50 ExtGState (50% opacity)');
+      logger.log('Added /GS_BG50 ExtGState (20% opacity)');
     }
 
     // Thay /X2 (logo)
@@ -166,7 +166,7 @@ export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
           const bgDisplayHFull = pageHeight;
           const displayW = bgDisplayHFull * bgW / bgH;
           const ty = verticalShift; // place image bottom at verticalShift (negative moves down)
-          const preContent = `q\n1 0 0 1 0 0 cm\n/GS_BG50 gs ${displayW} 0 0 ${bgDisplayHFull} 0 ${ty} cm /XBG Do\nQ\n`;
+          const preContent = `q\n1 0 0 1 0 0 cm\n/GS_BG50 gs ${displayW.toFixed(2)} 0 0 ${bgDisplayHFull.toFixed(2)} 0 ${ty.toFixed(2)} cm /XBG Do\nQ\n`;
           const preStream = pdfDoc.context.flateStream(Buffer.from(preContent, 'binary'));
           const preRef = pdfDoc.context.register(preStream);
 

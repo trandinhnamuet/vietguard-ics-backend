@@ -81,8 +81,8 @@ async function run() {
     const existing = resources.get(extGSKey);
     if (existing) extGSDict = pdfDoc.context.lookup(existing);
     else { extGSDict = pdfDoc.context.obj({}); resources.set(extGSKey, extGSDict); }
-    extGSDict.set(PDFName.of('GS_BG50'), pdfDoc.context.obj({ Type: 'ExtGState', ca: 0.5, CA: 0.5 }));
-    console.log('Assigned background to /XBG, neutralized /X1, added /GS_BG50');
+    extGSDict.set(PDFName.of('GS_BG50'), pdfDoc.context.obj({ Type: 'ExtGState', ca: 0.2, CA: 0.2 }));
+    console.log('Assigned background to /XBG, neutralized /X1, added /GS_BG50 (20% opacity)');
   }
 
   if (newLogo && xObjectDict.has(PDFName.of('X2'))) {
@@ -122,7 +122,7 @@ async function run() {
       const displayW = bgDisplayHFull * bgW / bgH;
       const verticalShift = -50;
       const ty = verticalShift;
-      const preContent = `q\n1 0 0 1 0 0 cm\n/GS_BG50 gs ${displayW} 0 0 ${bgDisplayHFull} 0 ${ty} cm /XBG Do\nQ\n`;
+      const preContent = `q\n1 0 0 1 0 0 cm\n/GS_BG50 gs ${displayW.toFixed(2)} 0 0 ${bgDisplayHFull.toFixed(2)} 0 ${ty.toFixed(2)} cm /XBG Do\nQ\n`;
       const preStream = pdfDoc.context.flateStream(Buffer.from(preContent, 'binary'));
       const preRef = pdfDoc.context.register(preStream);
       const contents = firstPage.node.get(PDFName.of('Contents'));
