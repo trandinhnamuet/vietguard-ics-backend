@@ -37,20 +37,44 @@ export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
     const { width: logoW, height: logoH } = getPngDimensions(logoBuffer);
     logger.log(`Logo: ${logoW}×${logoH} px`);
 
-    const bgPath = path.join(process.cwd(), 'public', 'background.png');
-    const hasBg = REPLACE_BACKGROUND && fs.existsSync(bgPath);
+    // Tìm background file: hỗ trợ PNG hoặc JPG/JPEG
+    const bgCandidates = [
+      path.join(process.cwd(), 'public', 'background.png'),
+      path.join(process.cwd(), 'public', 'background.jpg'),
+      path.join(process.cwd(), 'public', 'background.jpeg'),
+    ];
+    let bgPath: string | null = null;
+    if (REPLACE_BACKGROUND) {
+      for (const p of bgCandidates) {
+        if (fs.existsSync(p)) { bgPath = p; break; }
+      }
+    }
     let bgBuffer: Buffer | null = null;
     let bgW = 0, bgH = 0;
-    if (hasBg) {
+    let bgIsJpg = false;
+    if (bgPath) {
       bgBuffer = fs.readFileSync(bgPath);
-      ({ width: bgW, height: bgH } = getPngDimensions(bgBuffer));
-      logger.log(`Background: ${bgW}×${bgH} px`);
+      bgIsJpg = bgPath.toLowerCase().endsWith('.jpg') || bgPath.toLowerCase().endsWith('.jpeg');
+      if (!bgIsJpg) {
+        ({ width: bgW, height: bgH } = getPngDimensions(bgBuffer));
+      }
+      logger.log(`Background (${bgIsJpg ? 'jpg' : 'png'}): reading from ${bgPath}`);
     }
 
     // ── Load PDF + nhúng ảnh ─────────────────────────────────────────────────
     const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
     const newLogo = await pdfDoc.embedPng(logoBuffer);
-    const newBg   = hasBg ? await pdfDoc.embedPng(bgBuffer!) : null;
+    let newBg: any = null;
+    if (bgBuffer) {
+      if (bgIsJpg) {
+        newBg = await pdfDoc.embedJpg(bgBuffer);
+        bgW = newBg.width; bgH = newBg.height;
+      } else {
+        newBg = await pdfDoc.embedPng(bgBuffer);
+        bgW = newBg.width; bgH = newBg.height;
+      }
+      logger.log(`Background embedded: ${bgW}×${bgH} px`);
+    }
 
     const pages = pdfDoc.getPages();
     if (pages.length === 0) return pdfBuffer;
@@ -65,8 +89,8 @@ export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
     const xObjectDict = pdfDoc.context.lookup(xObjValue, PDFDict);
     if (!xObjectDict) return pdfBuffer;
 
-    // Thay /X1 (hình nền)
-    if (newBg && xObjectDict.has(PDFName.of('X1'))) {
+    // Thay /X1 (hình nền) – chỉ nếu background file tồn tại
+    if (newBg && bgPath && xObjectDict.has(PDFName.of('X1'))) {
       // Preserve original X1 under a new name so content's /X1 Do can be
       // made effectively a no-op by assigning an empty Form to /X1.
       const origRef = xObjectDict.get(PDFName.of('X1'));
@@ -123,8 +147,8 @@ export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
 
     // Hình nền: giữ nguyên chiều rộng trang (593.84 pt), chiều cao tính lại
     const bgPageW      = 593.84259033;
-    const bgDisplayH   = hasBg ? bgPageW * bgH / bgW : 840;
-    if (hasBg) {
+    const bgDisplayH   = newBg && bgPath ? bgPageW * bgH / bgW : 840;
+    if (newBg && bgPath) {
       logger.log(`Background display: ${bgPageW.toFixed(2)}×${bgDisplayH.toFixed(2)} pt (was ×840 pt)`);
     }
 
@@ -156,7 +180,7 @@ export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
 
       // Insert a new content stream *before* existing contents to draw
       // the background with a reset transform so it's anchored to page bottom.
-      if (newBg) {
+      if (newBg && bgPath) {
         try {
           const pageWidth = firstPage.getWidth();
           const bgDisplayHActual = pageWidth * bgH / bgW;
