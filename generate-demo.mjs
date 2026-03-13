@@ -81,8 +81,8 @@ async function run() {
     const existing = resources.get(extGSKey);
     if (existing) extGSDict = pdfDoc.context.lookup(existing);
     else { extGSDict = pdfDoc.context.obj({}); resources.set(extGSKey, extGSDict); }
-    extGSDict.set(PDFName.of('GS_BG50'), pdfDoc.context.obj({ Type: 'ExtGState', ca: 0.2, CA: 0.2 }));
-    console.log('Assigned background to /XBG, neutralized /X1, added /GS_BG50 (20% opacity)');
+    extGSDict.set(PDFName.of('GS_BG50'), pdfDoc.context.obj({ Type: 'ExtGState', ca: 0.1, CA: 0.1 }));
+    console.log('Assigned background to /XBG, neutralized /X1, added /GS_BG50 (10% opacity)');
   }
 
   if (newLogo && xObjectDict.has(PDFName.of('X2'))) {

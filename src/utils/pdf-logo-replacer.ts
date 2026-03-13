@@ -126,12 +126,14 @@ export async function replaceFirstPageLogo(pdfBuffer: Buffer): Promise<Buffer> {
         extGSDict = pdfDoc.context.obj({}) as PDFDict;
         resources.set(extGSKey, extGSDict);
       }
-      // /GS_BG50: graphics state với fill và stroke alpha = 0.2 (20% opacity)
+      // /GS_BG50: graphics state với fill và stroke alpha = 0.1 (10% opacity cho background)
+      // Logo sẽ được vẽ KHÔNG có opacity, nằm ngoài graphics state này
       extGSDict.set(
         PDFName.of('GS_BG50'),
-        pdfDoc.context.obj({ Type: 'ExtGState', ca: 0.2, CA: 0.2 }),
+        pdfDoc.context.obj({ Type: 'ExtGState', ca: 0.1, CA: 0.1 }),
       );
-      logger.log('Added /GS_BG50 ExtGState (20% opacity)');
+      logger.log('Added /GS_BG50 ExtGState (10% opacity cho background)');
+      logger.log('Logo sẽ không có opacity, hiển thị tại 100% độ rõ');
     }
 
     // Thay /X2 (logo)
